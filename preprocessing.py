@@ -49,9 +49,16 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # 1. Transaction Velocity
     # Count transactions by nameOrig within each step (representing hourly windows)
-    velocity = df.groupby(['step', 'nameOrig']).size().reset_index(name='transaction_velocity')
-    df = df.merge(velocity, on=['step', 'nameOrig'], how='left')
-    df['transaction_velocity'] = df['transaction_velocity'].fillna(1)
+    # Handle case where 'step' column might be missing
+    if 'step' in df.columns and 'nameOrig' in df.columns:
+        velocity = df.groupby(['step', 'nameOrig']).size().reset_index(name='transaction_velocity')
+        df = df.merge(velocity, on=['step', 'nameOrig'], how='left')
+        df['transaction_velocity'] = df['transaction_velocity'].fillna(1)
+    else:
+        # If step column is missing, add it as 0 or use a default value
+        if 'step' not in df.columns:
+            df['step'] = 0
+        df['transaction_velocity'] = 1
     
     # 2. Balance Error
     # Expected new balance = old balance - amount (for sender)

@@ -273,51 +273,28 @@ def generate_sample_transactions(num_transactions=10):
 
 
 def dashboard_page():
-    """Main Dashboard Page - Integrated with actual fraud detection model"""
+    """Main Dashboard Page - Matches the screenshot layout"""
     load_custom_css()
     
-    st.title("🛡️ Fraud Detection Dashboard")
-    
-    # Initialize models and load sample data if not already done
-    if not st.session_state.dashboard_data_loaded:
-        with st.spinner("Loading models and initializing dashboard..."):
-            # Load models
-            model_path = 'trained_models'
-            if os.path.exists(model_path) and os.path.exists(os.path.join(model_path, 'scaler.pkl')):
-                try:
-                    hybrid_model, scaler = load_models(model_path)
-                    st.session_state.hybrid_model = hybrid_model
-                    st.session_state.scaler = scaler
-                    st.session_state.models_loaded = True
-                except Exception as e:
-                    st.warning(f"Could not load models: {e}")
-            
-            # Load test data to populate dashboard if available
-            if os.path.exists('test_data.csv') and st.session_state.total_transactions == 0:
-                try:
-                    df_test = pd.read_csv('test_data.csv')
-                    st.session_state.total_transactions = len(df_test)
-                except:
-                    pass
-            
-            st.session_state.dashboard_data_loaded = True
+    st.title("Fraud Detection Dashboard")
     
     # Top Metrics Row (4 cards)
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        fraud_rate = (st.session_state.fraudulent_count / max(st.session_state.total_transactions, 1)) * 100
+        fraud_rate = (st.session_state.fraudulent_count / st.session_state.total_transactions) * 100
         st.metric(
             label="TOTAL TRANSACTIONS",
             value=f"{st.session_state.total_transactions:,}",
-            delta=f"+{len(st.session_state.recent_transactions)}" if len(st.session_state.recent_transactions) > 0 else "Run analysis"
+            delta="+12.5% from last period",
+            delta_color="normal"
         )
     
     with col2:
         st.metric(
             label="FRAUDULENT TRANSACTIONS",
             value=f"{st.session_state.fraudulent_count}",
-            delta=f"+{len([t for t in st.session_state.recent_transactions[:5] if t.get('is_fraud')])}",
+            delta="+8.3% from last period",
             delta_color="inverse"
         )
     
@@ -325,17 +302,15 @@ def dashboard_page():
         st.metric(
             label="FRAUD RATE",
             value=f"{fraud_rate:.2f}%",
-            delta="Real-time" if st.session_state.total_transactions > 0 else "0%"
+            delta="+0.2% from last period",
+            delta_color="inverse"
         )
     
     with col4:
-        # Active alerts = flagged transactions that haven't been resolved
-        active_count = len([t for t in st.session_state.flagged_transactions if t.get('transaction_id', t.get('nameOrig', 'N/A')) not in st.session_state.resolved_alerts])
-        st.session_state.active_alerts = active_count
         st.metric(
             label="ACTIVE ALERTS",
-            value=f"{active_count}",
-            delta="Live monitoring"
+            value=f"{st.session_state.active_alerts}",
+            delta="No change"
         )
     
     # Charts Row
@@ -346,178 +321,166 @@ def dashboard_page():
     with chart_col1:
         st.markdown("### Transaction Volume Over Time")
         
-        # Use actual transaction history if available
-        if len(st.session_state.transaction_history) > 0:
-            history_df = pd.DataFrame(st.session_state.transaction_history[-50:])
-            if 'amount' in history_df.columns:
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.plot(range(len(history_df)), history_df['amount'], marker='o', color='#3498db', linewidth=2.5, markersize=6)
-                ax.fill_between(range(len(history_df)), history_df['amount'], alpha=0.2, color='#3498db')
-                ax.set_xlabel('Transaction Sequence', fontsize=11, color='#2c3e50', fontweight='600')
-                ax.set_ylabel('Amount (USD)', fontsize=11, color='#2c3e50', fontweight='600')
-                ax.grid(True, alpha=0.3, linestyle='--', color='#bdc3c7')
-                ax.tick_params(axis='both', labelsize=9, colors='#2c3e50')
-                ax.set_facecolor('#f8fbff')
-                fig.patch.set_facecolor('white')
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
-                plt.close(fig)
-            else:
-                st.info("📊 Transaction data will appear here as you process transactions")
-        else:
-            st.info("📊 Run Real-Time Monitor or Batch Analysis to populate this chart")
+        # Generate sample time series data
+        dates = pd.date_range(end=datetime.now(), periods=20, freq='H')
+        volumes = [random.randint(500, 3000) for _ in range(20)]
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(dates, volumes, marker='o', color='#0d6efd', linewidth=2, markersize=6)
+        ax.fill_between(dates, volumes, alpha=0.1, color='#0d6efd')
+        ax.set_xlabel('')
+        ax.set_ylabel('Amount', fontsize=10)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.tick_params(axis='x', rotation=45, labelsize=8)
+        ax.tick_params(axis='y', labelsize=10)
+        plt.tight_layout()
+        st.pyplot(fig, clear_figure=True)
+        plt.close(fig)
     
     with chart_col2:
         st.markdown("### Risk Level Distribution")
         
-        # Calculate actual risk distribution from flagged transactions
-        if len(st.session_state.flagged_transactions) > 0:
-            risk_counts = {'LOW': 0, 'MEDIUM': 0, 'HIGH': 0, 'CRITICAL': 0}
-            for txn in st.session_state.flagged_transactions:
-                score = txn.get('fraud_score', txn.get('hybrid_score', 0.5))
-                risk_level, _ = get_risk_level(score)
-                risk_counts[risk_level] += 1
-            
-            total = sum(risk_counts.values())
-            if total > 0:
-                labels = [f"{k} ({v})" for k, v in risk_counts.items() if v > 0]
-                sizes = [v for v in risk_counts.values() if v > 0]
-                colors = ['#27ae60', '#f39c12', '#e67e22', '#e74c3c'][:len(sizes)]
-                
-                fig, ax = plt.subplots(figsize=(8, 5))
-                wedges, texts, autotexts = ax.pie(
-                    sizes, 
-                    labels=labels, 
-                    colors=colors,
-                    autopct='%1.1f%%',
-                    startangle=90,
-                    textprops={'fontsize': 11, 'weight': 'bold', 'color': '#2c3e50'}
-                )
-                ax.axis('equal')
-                ax.set_facecolor('#f8fbff')
-                fig.patch.set_facecolor('white')
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
-                plt.close(fig)
-            else:
-                st.info("📊 Risk distribution will appear as fraudulent transactions are detected")
-        else:
-            st.info("📊 Process transactions to see risk level distribution")
+        # Pie chart data
+        risk_levels = ['Low 20%', 'Critical 20%', 'High 40%', 'Medium 20%']
+        sizes = [20, 20, 40, 20]
+        colors = ['#28a745', '#dc3545', '#fd7e14', '#ffc107']
+        
+        fig, ax = plt.subplots(figsize=(8, 5))
+        wedges, texts, autotexts = ax.pie(
+            sizes, 
+            labels=risk_levels, 
+            colors=colors,
+            autopct='',
+            startangle=90,
+            textprops={'fontsize': 11, 'weight': 'bold'}
+        )
+        ax.axis('equal')
+        plt.tight_layout()
+        st.pyplot(fig, clear_figure=True)
+        plt.close(fig)
     
     # Recent Fraud Alerts Section
     st.markdown("<div class='section-header'>Recent Fraud Alerts</div>", unsafe_allow_html=True)
     
-    # Get actual flagged transactions that haven't been resolved
-    fraud_alerts = [t for t in st.session_state.flagged_transactions if t.get('transaction_id', t.get('nameOrig', 'N/A')) not in st.session_state.resolved_alerts]
-    
-    if len(fraud_alerts) == 0:
-        st.info("✅ No active fraud alerts. Run Real-Time Monitor or Batch Analysis to detect fraudulent transactions.")
+    # Create sample fraud alerts if none exist
+    if len(st.session_state.flagged_transactions) == 0:
+        sample_alerts = [
+            {'transaction_id': '', 'customer_id': '', 'amount': 2081.64, 'fraud_score': 0.875, 'risk_level': 'CRITICAL', 'timestamp': '12/2/2025, 1:33:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 3477.58, 'fraud_score': 0.353, 'risk_level': 'MEDIUM', 'timestamp': '12/2/2025, 2:16:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 773.19, 'fraud_score': 0.708, 'risk_level': 'LOW', 'timestamp': '12/2/2025, 2:39:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 746.77, 'fraud_score': 0.355, 'risk_level': 'HIGH', 'timestamp': '12/2/2025, 2:15:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 3733.93, 'fraud_score': 0.217, 'risk_level': 'MEDIUM', 'timestamp': '12/2/2025, 1:16:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 2925.76, 'fraud_score': 0.801, 'risk_level': 'MEDIUM', 'timestamp': '12/2/2025, 1:57:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 3900.41, 'fraud_score': 0.385, 'risk_level': 'MEDIUM', 'timestamp': '12/2/2025, 2:12:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 1858.27, 'fraud_score': 0.219, 'risk_level': 'CRITICAL', 'timestamp': '12/2/2025, 2:09:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 859.55, 'fraud_score': 0.910, 'risk_level': 'MEDIUM', 'timestamp': '12/2/2025, 2:38:57 PM'},
+            {'transaction_id': '', 'customer_id': '', 'amount': 4921.01, 'fraud_score': 0.254, 'risk_level': 'HIGH', 'timestamp': '12/2/2025, 1:52:57 PM'},
+        ]
+        fraud_alerts_df = pd.DataFrame(sample_alerts)
     else:
-        # Show last 10 fraud alerts
-        fraud_alerts_to_show = fraud_alerts[-10:]
-        
-        # Create refresh button
-        col_refresh1, col_refresh2 = st.columns([6, 1])
-        with col_refresh2:
-            if st.button("🔄 Refresh", key="refresh_alerts"):
-                st.rerun()
-        
-        # Display fraud alerts with functional buttons
+        fraud_alerts_df = pd.DataFrame(st.session_state.flagged_transactions[:10])
+    
+    # Create refresh button
+    col_refresh1, col_refresh2 = st.columns([6, 1])
+    with col_refresh2:
+        if st.button("🔄 Refresh", key="refresh_alerts"):
+            st.rerun()
+    
+    # Display fraud alerts table
+    if len(fraud_alerts_df) > 0:
+        # Create HTML table
         st.markdown("""
         <style>
-        .alert-row {
+        .fraud-table {
+            width: 100%;
             background: white;
-            padding: 14px;
             border-radius: 8px;
-            margin-bottom: 8px;
-            border: 1px solid #e3f2fd;
-            box-shadow: 0 2px 4px rgba(52, 152, 219, 0.08);
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .fraud-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .fraud-table th {
+            background-color: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            text-transform: uppercase;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .fraud-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+        .fraud-table tr:hover {
+            background-color: #f8f9fa;
         }
         </style>
         """, unsafe_allow_html=True)
         
-        # Header row
-        header_cols = st.columns([2, 2, 2, 3, 2, 3, 3])
-        headers = ["TRANSACTION ID", "CUSTOMER ID", "AMOUNT", "FRAUD SCORE", "RISK LEVEL", "TIME", "ACTIONS"]
-        for col, header in zip(header_cols, headers):
-            col.markdown(f"**{header}**")
+        table_html = '<div class="fraud-table"><table><thead><tr>'
+        table_html += '<th>TRANSACTION ID</th><th>CUSTOMER ID</th><th>AMOUNT</th><th>FRAUD SCORE</th><th>RISK LEVEL</th><th>TIME</th><th>ACTION</th>'
+        table_html += '</tr></thead><tbody>'
         
-        st.markdown("---")
+        for idx, row in fraud_alerts_df.iterrows():
+            risk_level, risk_class = get_risk_level(row.get('fraud_score', 0.5))
+            amount_display = f"₦{row.get('amount', 0):,.2f}"
+            
+            table_html += '<tr>'
+            table_html += f'<td>{row.get("transaction_id", "")}</td>'
+            table_html += f'<td>{row.get("customer_id", "")}</td>'
+            table_html += f'<td><strong>{amount_display}</strong></td>'
+            table_html += f'<td>{create_fraud_score_bar(row.get("fraud_score", 0.5))}</td>'
+            table_html += f'<td><span class="badge-{risk_class}">{risk_level}</span></td>'
+            table_html += f'<td>{row.get("timestamp", "")}</td>'
+            table_html += f'<td><button style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; margin-right:5px; cursor:pointer; font-size:12px; font-weight:600;">Resolve</button><button style="background:#17a2b8; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Investigate</button></td>'
+            table_html += '</tr>'
         
-        # Display each alert with interactive buttons
-        for idx, alert in enumerate(fraud_alerts_to_show):
-            score = alert.get('fraud_score', alert.get('hybrid_score', 0.5))
-            risk_level, risk_class = get_risk_level(score)
-            txn_id = alert.get('transaction_id', alert.get('nameOrig', f'TXN_{idx}'))[:15]
-            
-            cols = st.columns([2, 2, 2, 3, 2, 3, 3])
-            
-            with cols[0]:
-                st.markdown(f"**{txn_id}**")
-            with cols[1]:
-                cust_id = alert.get('customer_id', alert.get('nameOrig', 'N/A'))[:15]
-                st.markdown(cust_id)
-            with cols[2]:
-                st.markdown(f"**${alert.get('amount', 0):,.2f}**")
-            with cols[3]:
-                st.markdown(create_fraud_score_bar(score), unsafe_allow_html=True)
-            with cols[4]:
-                st.markdown(f'<span class="badge-{risk_class}">{risk_level}</span>', unsafe_allow_html=True)
-            with cols[5]:
-                timestamp = alert.get('timestamp', 'N/A')
-                st.markdown(f"<small>{timestamp}</small>", unsafe_allow_html=True)
-            with cols[6]:
-                btn_col1, btn_col2 = st.columns(2)
-                with btn_col1:
-                    if st.button("✅", key=f"resolve_{txn_id}_{idx}", help="Resolve", type="primary"):
-                        st.session_state.resolved_alerts.add(txn_id)
-                        st.toast(f"✅ Resolved {txn_id}", icon="✅")
-                        time.sleep(0.3)
-                        st.rerun()
-                with btn_col2:
-                    if st.button("🔍", key=f"investigate_{txn_id}_{idx}", help="Investigate"):
-                        with st.expander(f"🔍 Details - {txn_id}", expanded=True):
-                            st.json(alert)
-            
-            st.markdown("<div style='margin: 6px 0;'></div>", unsafe_allow_html=True)
+        table_html += '</tbody></table></div>'
+        st.markdown(table_html, unsafe_allow_html=True)
     
     # Recent Transactions Section
     st.markdown("<div class='section-header'>Recent Transactions</div>", unsafe_allow_html=True)
     
-    # Display transactions from recent_transactions
-    transactions = st.session_state.recent_transactions[:10] if len(st.session_state.recent_transactions) > 0 else []
+    # Generate sample transactions if none exist
+    if len(st.session_state.recent_transactions) == 0:
+        st.session_state.recent_transactions = generate_sample_transactions(10)
     
-    if len(transactions) == 0:
-        st.info("📝 Process transactions in Real-Time Monitor or Batch Analysis to see them appear here")
-    else:
-        # Display transactions in grid (2 columns)
-        for i in range(0, len(transactions), 2):
-            cols = st.columns(2)
-            
-            for j, col in enumerate(cols):
-                if i + j < len(transactions):
-                    txn = transactions[i + j]
-                    with col:
-                        status_badge = "FRAUD" if txn.get('is_fraud') else "CLEAN"
-                        badge_class = "badge-fraud" if txn.get('is_fraud') else "badge-clean"
-                        
-                        st.markdown(f"""
-                        <div class="transaction-card">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <span style="color: #7f8c8d; font-size: 13px; font-weight: 600;">{txn.get('transaction_id', 'N/A')}</span>
-                                <span class="{badge_class}">{status_badge}</span>
-                            </div>
-                            <div style="font-size: 26px; font-weight: 700; color: #2c3e50; margin-bottom: 8px;">
-                                ${txn.get('amount', 0):,.2f}
-                            </div>
-                            <div style="color: #7f8c8d; font-size: 13px; margin-bottom: 4px;">
-                                Customer: {txn.get('customer_id', 'N/A')}
-                            </div>
-                            <div style="color: #95a5a6; font-size: 12px;">
-                                {txn.get('timestamp', 'N/A')}
-                            </div>
+    # Display transactions in grid (2 columns)
+    transactions = st.session_state.recent_transactions[:10]
+    
+    for i in range(0, len(transactions), 2):
+        cols = st.columns(2)
+        
+        for j, col in enumerate(cols):
+            if i + j < len(transactions):
+                txn = transactions[i + j]
+                with col:
+                    status_badge = "FRAUD" if txn['is_fraud'] else "CLEAN"
+                    badge_class = "badge-fraud" if txn['is_fraud'] else "badge-clean"
+                    
+                    st.markdown(f"""
+                    <div class="transaction-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <span style="color: #6c757d; font-size: 13px; font-weight: 500;">{txn['transaction_id']}</span>
+                            <span class="{badge_class}">{status_badge}</span>
                         </div>
-                        """, unsafe_allow_html=True)
+                        <div style="font-size: 24px; font-weight: 700; color: #212529; margin-bottom: 8px;">
+                            ₦{txn['amount']:,.2f}
+                        </div>
+                        <div style="color: #6c757d; font-size: 13px; margin-bottom: 4px;">
+                            Customer: {txn['customer_id']}
+                        </div>
+                        <div style="color: #6c757d; font-size: 13px;">
+                            {txn['timestamp']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 
 def login_page():
@@ -621,30 +584,14 @@ def real_time_monitor():
                     st.session_state.hybrid_model = hybrid_model
                 else:
                     # Use a sample for training if models don't exist
-                    try:
-                        st.info("Training new scaler and models...")
-                        df_train = df_test.sample(min(10000, len(df_test)), random_state=42)
-                        
-                        # Ensure required columns exist
-                        required_cols = ['step', 'type', 'amount', 'nameOrig', 'oldbalanceOrg', 
-                                       'newbalanceOrig', 'nameDest', 'oldbalanceDest', 'newbalanceDest']
-                        missing_cols = [col for col in required_cols if col not in df_train.columns]
-                        
-                        if missing_cols:
-                            st.error(f"Missing required columns: {missing_cols}")
-                            st.info("Please upload a CSV with the correct PaySim format.")
-                            st.stop()
-                        
-                        X_train, scaler, _ = preprocess_data(df_train.copy())
-                        st.session_state.scaler = scaler
-                        
-                        # Train new models
-                        hybrid_model, _ = load_or_train_models(X_train)
-                        st.session_state.hybrid_model = hybrid_model
-                    except Exception as e:
-                        st.error(f"Error training models: {str(e)}")
-                        st.info("Please ensure your CSV file has the correct format and required columns.")
-                        st.stop()
+                    st.info("Training new scaler and models...")
+                    df_train = df_test.sample(min(10000, len(df_test)), random_state=42)
+                    X_train, scaler, _ = preprocess_data(df_train.copy())
+                    st.session_state.scaler = scaler
+                    
+                    # Train new models
+                    hybrid_model, _ = load_or_train_models(X_train)
+                    st.session_state.hybrid_model = hybrid_model
                 
                 st.session_state.models_loaded = True
         
@@ -679,26 +626,22 @@ def real_time_monitor():
             total_blocked = 0
             
             for idx, (_, transaction) in enumerate(transactions_to_process.iterrows()):
-                try:
-                    # Step 1: Feature engineering and selection
-                    transaction_df = pd.DataFrame([transaction])
-                    df_featured = engineer_features(transaction_df.copy())
-                    df_selected = select_features(df_featured)
-                    
-                    # Step 2: Extract raw feature row
-                    X_row = df_selected.values
-                    
-                    # Step 3: Apply scaler transform to get scaled features
-                    X_scaled = st.session_state.scaler.transform(X_row)
-                    
-                    # Step 4: Get predictions using scaled data
-                    predictions, hybrid_scores, individual_scores = st.session_state.hybrid_model.predict(
-                        X_scaled, 
-                        threshold=threshold
-                    )
-                except Exception as e:
-                    st.error(f"Error processing transaction {idx}: {str(e)}")
-                    continue
+                # Step 1: Feature engineering and selection
+                transaction_df = pd.DataFrame([transaction])
+                df_featured = engineer_features(transaction_df.copy())
+                df_selected = select_features(df_featured)
+                
+                # Step 2: Extract raw feature row
+                X_row = df_selected.values
+                
+                # Step 3: Apply scaler transform to get scaled features
+                X_scaled = st.session_state.scaler.transform(X_row)
+                
+                # Step 4: Get predictions using scaled data
+                predictions, hybrid_scores, individual_scores = st.session_state.hybrid_model.predict(
+                    X_scaled, 
+                    threshold=threshold
+                )
                 
                 total_processed += 1
                 hybrid_score = hybrid_scores[0]
@@ -762,13 +705,6 @@ def real_time_monitor():
                     st.session_state.recent_transactions.insert(0, recent_txn)
                     st.session_state.recent_transactions = st.session_state.recent_transactions[:20]
                     st.session_state.total_transactions += 1
-                    
-                    # Track for charts
-                    st.session_state.transaction_history.append({
-                        'amount': transaction.get('amount', 0),
-                        'timestamp': datetime.now(),
-                        'is_fraud': is_blocked
-                    })
                 
                 # Update metrics
                 with metrics_placeholder.container():
@@ -984,7 +920,7 @@ def main():
         login_page()
         return
     
-    # Sidebar navigation with custom styling
+    # Sidebar navigation
     with st.sidebar:
         st.markdown("### 🛡️ Fraud Detection System")
         st.markdown("---")
@@ -992,39 +928,20 @@ def main():
         selected = option_menu(
             menu_title=None,
             options=["Dashboard", "Real-Time Monitor", "Batch Analysis", "Investigation & Reports"],
-            icons=["speedometer2", "activity", "folder2-open", "file-earmark-text"],
+            icons=["speedometer2", "activity", "folder", "search"],
             menu_icon="cast",
             default_index=0,
-            styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "#3498db", "font-size": "18px"},
-                "nav-link": {
-                    "font-size": "14px",
-                    "text-align": "left",
-                    "margin": "2px",
-                    "padding": "10px",
-                    "border-radius": "8px",
-                    "color": "#ecf0f1"
-                },
-                "nav-link-selected": {
-                    "background-color": "#3498db",
-                    "color": "white",
-                    "font-weight": "600"
-                },
-            }
         )
         
         st.markdown("---")
-        st.markdown("### 👤 User Info")
-        st.markdown("**Logged in as:** admin")
-        st.markdown(f"**Session:** {datetime.now().strftime('%H:%M:%S')}")
+        st.markdown("### User Info")
+        st.info("👤 **User:** admin")
         
-        if st.button("🚪 Logout", use_container_width=True):
+        if st.button("🚪 Logout"):
             st.session_state.logged_in = False
             st.session_state.flagged_transactions = []
             st.session_state.recent_transactions = []
             st.session_state.anomaly_scores_history = []
-            st.session_state.dashboard_data_loaded = False
             st.rerun()
     
     # Route to selected page
