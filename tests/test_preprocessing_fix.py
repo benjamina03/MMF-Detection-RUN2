@@ -23,10 +23,10 @@ df_with_step = pd.DataFrame({
 try:
     df_featured = engineer_features(df_with_step.copy())
     df_selected = select_features(df_featured)
-    print(f"✅ Success! Generated {len(df_selected.columns)} features")
+    print(f"Success! Generated {len(df_selected.columns)} features")
     print(f"   Features: {list(df_selected.columns)[:5]}...")
 except Exception as e:
-    print(f"❌ Error: {e}")
+    print(f"Error: {e}")
 
 # Test 2: DataFrame without step column
 print("\nTest 2: DataFrame WITHOUT step column")
@@ -44,10 +44,10 @@ df_without_step = pd.DataFrame({
 try:
     df_featured = engineer_features(df_without_step.copy())
     df_selected = select_features(df_featured)
-    print(f"✅ Success! Generated {len(df_selected.columns)} features")
+    print(f"Success! Generated {len(df_selected.columns)} features")
     print(f"   Step column added: {'step' in df_featured.columns}")
     print(f"   Features: {list(df_selected.columns)[:5]}...")
 except Exception as e:
-    print(f"❌ Error: {e}")
+    print(f"Error: {e}")
 
-print("\n✅ All tests passed! The fix is working correctly.")
+print("\nAll tests passed! The fix is working correctly.")

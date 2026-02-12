@@ -251,6 +251,9 @@ class HybridModel:
         self.autoencoder = AutoencoderModel(input_dim=input_dim)
         self.dbscan = DBSCANModel(eps=0.5, min_samples=5)
         self.input_dim = input_dim
+        self.iso_score_bounds = None
+        self.ae_error_bounds = None
+        self.default_threshold = 0.75
         
     def train(self, X_train: np.ndarray, ae_epochs: int = 50):
         """
@@ -268,8 +271,37 @@ class HybridModel:
         
         print("\nFitting DBSCAN...")
         self.dbscan.train(X_train)
+
+        # Calibrate normalization ranges from training distribution.
+        # This avoids degenerate per-sample min-max scaling during real-time inference.
+        iso_train_scores = self.iso_forest.score_samples(X_train)
+        ae_train_errors = self.autoencoder.get_reconstruction_errors(X_train)
+        self.iso_score_bounds = (
+            float(np.min(iso_train_scores)),
+            float(np.max(iso_train_scores))
+        )
+        self.ae_error_bounds = (
+            float(np.min(ae_train_errors)),
+            float(np.max(ae_train_errors))
+        )
+
+        # Data-driven decision threshold based on training score distribution.
+        # 95th percentile yields expected anomaly sensitivity for unsupervised detection.
+        hybrid_train_scores, _ = self.calculate_hybrid_score(X_train)
+        self.default_threshold = float(np.percentile(hybrid_train_scores, 95))
         
-        print("\n✓ All models trained successfully!")
+        print("\nAll models trained successfully!")
+
+    @staticmethod
+    def _normalize_with_bounds(values: np.ndarray, bounds: Tuple[float, float], invert: bool = False) -> np.ndarray:
+        """Normalize values to [0, 1] with precomputed bounds."""
+        min_v, max_v = bounds
+        denom = max(max_v - min_v, 1e-12)
+        normalized = (values - min_v) / denom
+        normalized = np.clip(normalized, 0.0, 1.0)
+        if invert:
+            normalized = 1.0 - normalized
+        return normalized
     
     def calculate_hybrid_score(self, X: np.ndarray) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         """
@@ -290,11 +322,23 @@ class HybridModel:
         dbscan_preds = self.dbscan.predict(X)
         
         # Normalize to [0, 1] where 1 = more anomalous
-        # Isolation Forest: lower scores are more anomalous, so invert
-        iso_normalized = 1 - MinMaxScaler().fit_transform(iso_scores.reshape(-1, 1)).flatten()
+        # Isolation Forest: lower scores are more anomalous, so invert.
+        if self.iso_score_bounds is not None:
+            iso_normalized = self._normalize_with_bounds(iso_scores, self.iso_score_bounds, invert=True)
+        else:
+            if len(iso_scores) > 1:
+                iso_normalized = 1 - MinMaxScaler().fit_transform(iso_scores.reshape(-1, 1)).flatten()
+            else:
+                iso_normalized = np.full(len(iso_scores), 0.5)
         
-        # Autoencoder: higher errors are more anomalous
-        ae_normalized = MinMaxScaler().fit_transform(ae_errors.reshape(-1, 1)).flatten()
+        # Autoencoder: higher errors are more anomalous.
+        if self.ae_error_bounds is not None:
+            ae_normalized = self._normalize_with_bounds(ae_errors, self.ae_error_bounds, invert=False)
+        else:
+            if len(ae_errors) > 1:
+                ae_normalized = MinMaxScaler().fit_transform(ae_errors.reshape(-1, 1)).flatten()
+            else:
+                ae_normalized = np.full(len(ae_errors), 0.5)
         
         # DBSCAN: already binary (0 or 1)
         dbscan_normalized = dbscan_preds.astype(float)
@@ -357,8 +401,16 @@ def save_models(hybrid_model: HybridModel, scaler, filepath: str = 'trained_mode
     
     # Save scaler
     joblib.dump(scaler, os.path.join(filepath, 'scaler.pkl'))
+
+    # Save normalization calibration metadata
+    calibration = {
+        'iso_score_bounds': hybrid_model.iso_score_bounds,
+        'ae_error_bounds': hybrid_model.ae_error_bounds,
+        'default_threshold': hybrid_model.default_threshold
+    }
+    joblib.dump(calibration, os.path.join(filepath, 'calibration.pkl'))
     
-    print(f"✓ Models saved to {filepath}/")
+    print(f"Models saved to {filepath}/")
 
 
 def load_models(filepath: str = 'trained_models') -> Tuple[HybridModel, object]:
@@ -390,7 +442,15 @@ def load_models(filepath: str = 'trained_models') -> Tuple[HybridModel, object]:
     
     # Load DBSCAN
     hybrid_model.dbscan = joblib.load(os.path.join(filepath, 'dbscan.pkl'))
+
+    # Load optional calibration metadata (for backward compatibility)
+    calibration_path = os.path.join(filepath, 'calibration.pkl')
+    if os.path.exists(calibration_path):
+        calibration = joblib.load(calibration_path)
+        hybrid_model.iso_score_bounds = calibration.get('iso_score_bounds')
+        hybrid_model.ae_error_bounds = calibration.get('ae_error_bounds')
+        hybrid_model.default_threshold = float(calibration.get('default_threshold', hybrid_model.default_threshold))
     
-    print(f"✓ Models loaded from {filepath}/")
+    print(f"Models loaded from {filepath}/")
     
     return hybrid_model, scaler

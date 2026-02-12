@@ -8,16 +8,19 @@ from streamlit_option_menu import option_menu
 import pandas as pd
 import numpy as np
 import time
-import matplotlib.pyplot as plt
-import seaborn as sns
 from datetime import datetime, timedelta
 import os
 import random
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Import custom modules
 from preprocessing import preprocess_data, preprocess_single_transaction, engineer_features, select_features
 from models import HybridModel, save_models, load_models
 import joblib
+
+DATA_DIR = "data"
+DEFAULT_TEST_DATA_PATH = os.path.join(DATA_DIR, "test_data.csv")
 
 
 # Page configuration
@@ -34,7 +37,7 @@ def load_custom_css():
     <style>
     /* Main container - Light theme */
     .main {
-        background-color: #f0f4f8;
+        background: radial-gradient(circle at top right, #eaf4ff 0%, #f8fbff 45%, #ffffff 100%);
     }
     
     /* Metric cards - White with blue accents */
@@ -89,6 +92,83 @@ def load_custom_css():
         box-shadow: 0 2px 8px rgba(52, 152, 219, 0.1);
         margin-bottom: 20px;
         border: 1px solid #e3f2fd;
+    }
+
+    .objective-card {
+        background: linear-gradient(180deg, #ffffff 0%, #f3f9ff 100%);
+        border: 1px solid #d7e9fb;
+        border-left: 5px solid #2d9bf0;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+    }
+
+    .objective-complete {
+        border-left-color: #17a673;
+    }
+
+    .login-shell {
+        background: linear-gradient(135deg, #eef6ff 0%, #ffffff 60%);
+        border: 1px solid #d6e9fb;
+        border-radius: 18px;
+        padding: 28px;
+        margin-top: 10px;
+        box-shadow: 0 14px 28px rgba(45, 155, 240, 0.12);
+    }
+
+    .login-title {
+        color: #1f5f99;
+        font-size: 30px;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+
+    .login-subtitle {
+        color: #5d7f9f;
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+
+    .login-note {
+        background: #f3f9ff;
+        border-left: 4px solid #2d9bf0;
+        border-radius: 8px;
+        padding: 12px;
+        color: #376185;
+        font-size: 13px;
+        margin-top: 14px;
+    }
+
+    .hero-panel {
+        background: linear-gradient(110deg, #1f5f99 0%, #2d9bf0 60%, #78bfff 100%);
+        border-radius: 16px;
+        padding: 20px;
+        color: #ffffff;
+        box-shadow: 0 10px 30px rgba(31, 95, 153, 0.25);
+        margin-bottom: 16px;
+    }
+
+    .hero-title {
+        font-size: 26px;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+
+    .hero-subtitle {
+        font-size: 14px;
+        opacity: 0.95;
+        margin-bottom: 10px;
+    }
+
+    .soft-tag {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 20px;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 700;
+        margin-right: 6px;
     }
     
     /* Transaction cards */
@@ -217,6 +297,12 @@ if 'dashboard_data_loaded' not in st.session_state:
     st.session_state.dashboard_data_loaded = False
 if 'resolved_alerts' not in st.session_state:
     st.session_state.resolved_alerts = set()
+if 'manual_reviews' not in st.session_state:
+    st.session_state.manual_reviews = {}
+if 'analysis_runs' not in st.session_state:
+    st.session_state.analysis_runs = 0
+if 'uploaded_datasets' not in st.session_state:
+    st.session_state.uploaded_datasets = set()
 
 
 def get_risk_level(score):
@@ -229,6 +315,37 @@ def get_risk_level(score):
         return "MEDIUM", "medium"
     else:
         return "LOW", "low"
+
+
+def get_recommended_action(score: float, review_status: str = "Pending") -> str:
+    """Return recommended action based on risk score and manual review state."""
+    if review_status == "Confirmed Fraud":
+        return "Freeze account, block transaction, and escalate to fraud team."
+    if review_status == "False Positive":
+        return "Release transaction and tune threshold/feature checks."
+    if score >= 0.75:
+        return "Block immediately and require customer verification."
+    if score >= 0.6:
+        return "Hold transaction for analyst review before release."
+    if score >= 0.4:
+        return "Allow with monitoring and place customer on watchlist."
+    return "Allow transaction and continue normal monitoring."
+
+
+def calculate_objective_status():
+    """Track progress against project objectives."""
+    uploaded = len(st.session_state.uploaded_datasets) > 0
+    analyzed = st.session_state.analysis_runs > 0
+    flagged = len(st.session_state.flagged_transactions) > 0
+    reviewed = len(st.session_state.manual_reviews) > 0
+    recommended = flagged
+    return {
+        "1. Upload mobile money dataset for analysis": uploaded,
+        "2. Analyze transactions against normal behavior": analyzed,
+        "3. Flag fraudulent activities": flagged,
+        "4. Validate flagged transactions via manual inspection": reviewed,
+        "5. Recommend actions after manual analysis": recommended
+    }
 
 
 def create_fraud_score_bar(score):
@@ -273,15 +390,13 @@ def generate_sample_transactions(num_transactions=10):
 
 
 def dashboard_page():
-    """Main Dashboard Page - Integrated with actual fraud detection model"""
+    """Main Dashboard Page - aligned with project objectives."""
     load_custom_css()
-    
-    st.title("🛡️ Fraud Detection Dashboard")
-    
-    # Initialize models and load sample data if not already done
+
+    st.title("Fraud Detection Dashboard")
+
     if not st.session_state.dashboard_data_loaded:
         with st.spinner("Loading models and initializing dashboard..."):
-            # Load models
             model_path = 'trained_models'
             if os.path.exists(model_path) and os.path.exists(os.path.join(model_path, 'scaler.pkl')):
                 try:
@@ -291,263 +406,460 @@ def dashboard_page():
                     st.session_state.models_loaded = True
                 except Exception as e:
                     st.warning(f"Could not load models: {e}")
-            
-            # Load test data to populate dashboard if available
-            if os.path.exists('test_data.csv') and st.session_state.total_transactions == 0:
+            test_data_path = DEFAULT_TEST_DATA_PATH if os.path.exists(DEFAULT_TEST_DATA_PATH) else 'test_data.csv'
+            if os.path.exists(test_data_path) and st.session_state.total_transactions == 0:
                 try:
-                    df_test = pd.read_csv('test_data.csv')
+                    df_test = pd.read_csv(test_data_path)
                     st.session_state.total_transactions = len(df_test)
-                except:
+                except Exception:
                     pass
-            
             st.session_state.dashboard_data_loaded = True
-    
-    # Top Metrics Row (4 cards)
+
+    fraud_rate = (st.session_state.fraudulent_count / max(st.session_state.total_transactions, 1)) * 100
+    active_count = len([
+        t for t in st.session_state.flagged_transactions
+        if t.get('transaction_id', t.get('nameOrig', 'N/A')) not in st.session_state.resolved_alerts
+    ])
+    st.session_state.active_alerts = active_count
+    objective_status = calculate_objective_status()
+    completed = sum(objective_status.values())
+    progress = completed / len(objective_status)
+    resolved_count = len(st.session_state.resolved_alerts)
+
+    st.markdown(
+        f"""
+        <div class="hero-panel">
+            <div class="hero-title">Hybrid Unsupervised Fraud Intelligence</div>
+            <div class="hero-subtitle">Real-time and batch detection using Isolation Forest, Autoencoder, and DBSCAN.</div>
+            <span class="soft-tag">Objectives Completed: {completed}/5</span>
+            <span class="soft-tag">Fraud Rate: {fraud_rate:.2f}%</span>
+            <span class="soft-tag">Active Alerts: {active_count}</span>
+            <span class="soft-tag">Resolved Alerts: {resolved_count}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
-        fraud_rate = (st.session_state.fraudulent_count / max(st.session_state.total_transactions, 1)) * 100
-        st.metric(
-            label="TOTAL TRANSACTIONS",
-            value=f"{st.session_state.total_transactions:,}",
-            delta=f"+{len(st.session_state.recent_transactions)}" if len(st.session_state.recent_transactions) > 0 else "Run analysis"
-        )
-    
+        st.metric("TOTAL TRANSACTIONS", f"{st.session_state.total_transactions:,}", f"+{len(st.session_state.recent_transactions)}")
     with col2:
-        st.metric(
-            label="FRAUDULENT TRANSACTIONS",
-            value=f"{st.session_state.fraudulent_count}",
-            delta=f"+{len([t for t in st.session_state.recent_transactions[:5] if t.get('is_fraud')])}",
-            delta_color="inverse"
-        )
-    
+        st.metric("FRAUDULENT TRANSACTIONS", f"{st.session_state.fraudulent_count}", delta_color="inverse")
     with col3:
-        st.metric(
-            label="FRAUD RATE",
-            value=f"{fraud_rate:.2f}%",
-            delta="Real-time" if st.session_state.total_transactions > 0 else "0%"
-        )
-    
+        st.metric("FRAUD RATE", f"{fraud_rate:.2f}%", "Real-time")
     with col4:
-        # Active alerts = flagged transactions that haven't been resolved
-        active_count = len([t for t in st.session_state.flagged_transactions if t.get('transaction_id', t.get('nameOrig', 'N/A')) not in st.session_state.resolved_alerts])
-        st.session_state.active_alerts = active_count
-        st.metric(
-            label="ACTIVE ALERTS",
-            value=f"{active_count}",
-            delta="Live monitoring"
+        st.metric("ACTIVE ALERTS", f"{active_count}", "Needs review")
+
+    exec_col1, exec_col2 = st.columns(2)
+    with exec_col1:
+        st.markdown("### Executive Risk Gauge")
+        risk_gauge = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=fraud_rate,
+                title={"text": "Current Fraud Rate (%)"},
+                number={"suffix": "%"},
+                gauge={
+                    "axis": {"range": [0, 100]},
+                    "bar": {"color": "#2d9bf0"},
+                    "steps": [
+                        {"range": [0, 2], "color": "#eaf7ef"},
+                        {"range": [2, 5], "color": "#fff6e5"},
+                        {"range": [5, 100], "color": "#fdecec"}
+                    ],
+                }
+            )
         )
-    
-    # Charts Row
-    st.markdown("<div style='margin-top: 30px;'></div>", unsafe_allow_html=True)
-    
+        risk_gauge.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10), height=260)
+        st.plotly_chart(risk_gauge, width='stretch')
+
+    with exec_col2:
+        st.markdown("### Objective Completion Gauge")
+        objective_gauge = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=completed,
+                title={"text": "Objectives Completed"},
+                number={"suffix": "/5"},
+                gauge={
+                    "axis": {"range": [0, 5]},
+                    "bar": {"color": "#1f5f99"},
+                    "steps": [
+                        {"range": [0, 2], "color": "#fdecec"},
+                        {"range": [2, 4], "color": "#fff6e5"},
+                        {"range": [4, 5], "color": "#eaf7ef"},
+                    ],
+                }
+            )
+        )
+        objective_gauge.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10), height=260)
+        st.plotly_chart(objective_gauge, width='stretch')
+
+    st.markdown("<div class='section-header'>Objectives Progress</div>", unsafe_allow_html=True)
+    st.progress(progress, text=f"{completed}/5 objectives currently covered")
+
+    for objective, done in objective_status.items():
+        state_text = "Completed" if done else "Pending"
+        state_class = "objective-card objective-complete" if done else "objective-card"
+        st.markdown(
+            f"<div class='{state_class}'><strong>{objective}</strong><br><small>Status: {state_text}</small></div>",
+            unsafe_allow_html=True
+        )
+
+    objective_rows = []
+    objective_rows.append({
+        "Objective": "1. Upload mobile money dataset for analysis",
+        "Status": "Completed" if objective_status["1. Upload mobile money dataset for analysis"] else "Pending",
+        "Evidence": f"{len(st.session_state.uploaded_datasets)} dataset(s) uploaded",
+        "How Answered": "Real-Time and Batch upload modules"
+    })
+    objective_rows.append({
+        "Objective": "2. Analyze transactions against normal behavior",
+        "Status": "Completed" if objective_status["2. Analyze transactions against normal behavior"] else "Pending",
+        "Evidence": f"{st.session_state.analysis_runs} analysis run(s)",
+        "How Answered": "Hybrid score from Isolation Forest + Autoencoder + DBSCAN"
+    })
+    objective_rows.append({
+        "Objective": "3. Flag fraudulent activities",
+        "Status": "Completed" if objective_status["3. Flag fraudulent activities"] else "Pending",
+        "Evidence": f"{len(st.session_state.flagged_transactions)} flagged transaction(s)",
+        "How Answered": "Threshold-based anomaly blocking"
+    })
+    objective_rows.append({
+        "Objective": "4. Validate flagged transactions via manual inspection",
+        "Status": "Completed" if objective_status["4. Validate flagged transactions via manual inspection"] else "Pending",
+        "Evidence": f"{len(st.session_state.manual_reviews)} reviewed transaction(s)",
+        "How Answered": "Investigation page decision workflow"
+    })
+    objective_rows.append({
+        "Objective": "5. Recommend actions after manual analysis",
+        "Status": "Completed" if objective_status["5. Recommend actions after manual analysis"] else "Pending",
+        "Evidence": "Recommendation engine active",
+        "How Answered": "Risk-aware action suggestion for each alert"
+    })
+    st.dataframe(pd.DataFrame(objective_rows), width='stretch')
+
     chart_col1, chart_col2 = st.columns(2)
-    
     with chart_col1:
-        st.markdown("### Transaction Volume Over Time")
-        
-        # Use actual transaction history if available
+        st.markdown("### Transaction Volume and Detection Trend")
         if len(st.session_state.transaction_history) > 0:
-            history_df = pd.DataFrame(st.session_state.transaction_history[-50:])
-            if 'amount' in history_df.columns:
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.plot(range(len(history_df)), history_df['amount'], marker='o', color='#3498db', linewidth=2.5, markersize=6)
-                ax.fill_between(range(len(history_df)), history_df['amount'], alpha=0.2, color='#3498db')
-                ax.set_xlabel('Transaction Sequence', fontsize=11, color='#2c3e50', fontweight='600')
-                ax.set_ylabel('Amount (USD)', fontsize=11, color='#2c3e50', fontweight='600')
-                ax.grid(True, alpha=0.3, linestyle='--', color='#bdc3c7')
-                ax.tick_params(axis='both', labelsize=9, colors='#2c3e50')
-                ax.set_facecolor('#f8fbff')
-                fig.patch.set_facecolor('white')
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
-                plt.close(fig)
-            else:
-                st.info("📊 Transaction data will appear here as you process transactions")
+            history_df = pd.DataFrame(st.session_state.transaction_history[-120:])
+            history_df = history_df.reset_index().rename(columns={"index": "sequence"})
+            fig = px.line(
+                history_df,
+                x="sequence",
+                y="amount",
+                color="is_fraud",
+                color_discrete_map={False: "#2d9bf0", True: "#e74c3c"},
+                labels={"sequence": "Transaction Sequence", "amount": "Amount", "is_fraud": "Flagged"},
+                markers=True
+            )
+            fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=10, b=10), legend_orientation="h")
+            st.plotly_chart(fig, width='stretch')
         else:
-            st.info("📊 Run Real-Time Monitor or Batch Analysis to populate this chart")
-    
+            st.info("Run Real-Time Monitor or Batch Analysis to populate this chart.")
+
     with chart_col2:
         st.markdown("### Risk Level Distribution")
-        
-        # Calculate actual risk distribution from flagged transactions
         if len(st.session_state.flagged_transactions) > 0:
-            risk_counts = {'LOW': 0, 'MEDIUM': 0, 'HIGH': 0, 'CRITICAL': 0}
+            risk_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0}
             for txn in st.session_state.flagged_transactions:
                 score = txn.get('fraud_score', txn.get('hybrid_score', 0.5))
                 risk_level, _ = get_risk_level(score)
                 risk_counts[risk_level] += 1
-            
-            total = sum(risk_counts.values())
-            if total > 0:
-                labels = [f"{k} ({v})" for k, v in risk_counts.items() if v > 0]
-                sizes = [v for v in risk_counts.values() if v > 0]
-                colors = ['#27ae60', '#f39c12', '#e67e22', '#e74c3c'][:len(sizes)]
-                
-                fig, ax = plt.subplots(figsize=(8, 5))
-                wedges, texts, autotexts = ax.pie(
-                    sizes, 
-                    labels=labels, 
-                    colors=colors,
-                    autopct='%1.1f%%',
-                    startangle=90,
-                    textprops={'fontsize': 11, 'weight': 'bold', 'color': '#2c3e50'}
+            risk_df = pd.DataFrame({"risk_level": list(risk_counts.keys()), "count": list(risk_counts.values())})
+            risk_df = risk_df[risk_df["count"] > 0]
+            if not risk_df.empty:
+                fig = px.pie(
+                    risk_df,
+                    values="count",
+                    names="risk_level",
+                    hole=0.55,
+                    color="risk_level",
+                    color_discrete_map={
+                        "LOW": "#17a673",
+                        "MEDIUM": "#f39c12",
+                        "HIGH": "#e67e22",
+                        "CRITICAL": "#e74c3c"
+                    }
                 )
-                ax.axis('equal')
-                ax.set_facecolor('#f8fbff')
-                fig.patch.set_facecolor('white')
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
-                plt.close(fig)
-            else:
-                st.info("📊 Risk distribution will appear as fraudulent transactions are detected")
+                fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=10, b=10), legend_orientation="h")
+                st.plotly_chart(fig, width='stretch')
         else:
-            st.info("📊 Process transactions to see risk level distribution")
-    
-    # Recent Fraud Alerts Section
-    st.markdown("<div class='section-header'>Recent Fraud Alerts</div>", unsafe_allow_html=True)
-    
-    # Get actual flagged transactions that haven't been resolved
-    fraud_alerts = [t for t in st.session_state.flagged_transactions if t.get('transaction_id', t.get('nameOrig', 'N/A')) not in st.session_state.resolved_alerts]
-    
+            st.info("No flagged transactions yet.")
+
+    deep_col1, deep_col2 = st.columns(2)
+    with deep_col1:
+        st.markdown("### Amount Distribution by Decision")
+        if len(st.session_state.transaction_history) > 0:
+            dist_df = pd.DataFrame(st.session_state.transaction_history[-300:]).copy()
+            dist_df["decision"] = dist_df["is_fraud"].map({True: "Blocked", False: "Approved"})
+            amount_fig = px.violin(
+                dist_df,
+                x="decision",
+                y="amount",
+                box=True,
+                points="outliers",
+                color="decision",
+                color_discrete_map={"Approved": "#2d9bf0", "Blocked": "#e74c3c"},
+            )
+            amount_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(amount_fig, width='stretch')
+        else:
+            st.info("No transaction history yet for amount analytics.")
+
+    with deep_col2:
+        st.markdown("### Hourly Fraud Pattern")
+        if len(st.session_state.transaction_history) > 0:
+            hour_df = pd.DataFrame(st.session_state.transaction_history[-500:]).copy()
+            hour_df["hour"] = pd.to_datetime(hour_df["timestamp"]).dt.hour
+            hour_df["blocked"] = hour_df["is_fraud"].astype(int)
+            hour_summary = hour_df.groupby("hour", as_index=False).agg(
+                blocked_rate=("blocked", "mean"),
+                tx_count=("blocked", "count")
+            )
+            hour_summary["blocked_rate"] = hour_summary["blocked_rate"] * 100
+            hourly_fig = px.bar(
+                hour_summary,
+                x="hour",
+                y="blocked_rate",
+                color="tx_count",
+                color_continuous_scale=["#d6ebff", "#2d9bf0"],
+                labels={"blocked_rate": "Blocked Rate (%)", "hour": "Hour of Day", "tx_count": "Transactions"},
+            )
+            hourly_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=20, b=10), coloraxis_showscale=False)
+            st.plotly_chart(hourly_fig, width='stretch')
+        else:
+            st.info("No timestamp pattern available yet.")
+
+    smart_col1, smart_col2 = st.columns(2)
+    with smart_col1:
+        st.markdown("### Hybrid Score Trend and Cumulative Fraud Rate")
+        if len(st.session_state.anomaly_scores_history) > 0:
+            score_df = pd.DataFrame(st.session_state.anomaly_scores_history).copy()
+            score_df["cumulative_fraud_rate"] = (
+                score_df["blocked"].astype(int).cumsum() / (score_df.index + 1)
+            ) * 100
+            score_df["rolling_score"] = score_df["score"].rolling(window=5, min_periods=1).mean()
+
+            trend_fig = px.line(
+                score_df,
+                x="transaction_id",
+                y=["score", "rolling_score"],
+                labels={"value": "Hybrid Score", "transaction_id": "Transaction Sequence", "variable": "Metric"},
+                color_discrete_sequence=["#2d9bf0", "#1f5f99"]
+            )
+            trend_fig.add_hline(y=float(getattr(st.session_state.hybrid_model, "default_threshold", 0.75)),
+                                line_dash="dash", line_color="#e74c3c")
+            trend_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(trend_fig, width='stretch')
+
+            fraud_rate_fig = px.area(
+                score_df,
+                x="transaction_id",
+                y="cumulative_fraud_rate",
+                labels={"transaction_id": "Transaction Sequence", "cumulative_fraud_rate": "Fraud Rate (%)"},
+                color_discrete_sequence=["#7fb3e6"]
+            )
+            fraud_rate_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(fraud_rate_fig, width='stretch')
+        else:
+            st.info("Run detection to populate hybrid score intelligence.")
+
+    with smart_col2:
+        st.markdown("### Review Outcomes and Action Intelligence")
+        if len(st.session_state.flagged_transactions) > 0:
+            review_df = pd.DataFrame(st.session_state.flagged_transactions).copy()
+            if "transaction_id" not in review_df.columns:
+                review_df["transaction_id"] = review_df.index.astype(str)
+            review_df["review_status"] = review_df["transaction_id"].astype(str).apply(
+                lambda tid: st.session_state.manual_reviews.get(tid, "Pending")
+            )
+
+            review_counts = (
+                review_df["review_status"]
+                .value_counts()
+                .rename_axis("review_status")
+                .reset_index(name="count")
+            )
+            outcome_fig = px.pie(
+                review_counts,
+                names="review_status",
+                values="count",
+                hole=0.5,
+                color="review_status",
+                color_discrete_map={
+                    "Confirmed Fraud": "#e74c3c",
+                    "False Positive": "#3498db",
+                    "Pending": "#f39c12"
+                }
+            )
+            outcome_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(outcome_fig, width='stretch')
+
+            if "recommended_action" in review_df.columns:
+                action_counts = (
+                    review_df["recommended_action"]
+                    .fillna("No action")
+                    .value_counts()
+                    .head(8)
+                    .rename_axis("recommended_action")
+                    .reset_index(name="count")
+                )
+                action_fig = px.bar(
+                    action_counts,
+                    x="count",
+                    y="recommended_action",
+                    orientation="h",
+                    color="count",
+                    color_continuous_scale=["#d6ebff", "#2d9bf0"]
+                )
+                action_fig.update_layout(
+                    template="plotly_white",
+                    margin=dict(l=10, r=10, t=20, b=10),
+                    coloraxis_showscale=False,
+                    yaxis_title="Recommended Action",
+                    xaxis_title="Frequency"
+                )
+                st.plotly_chart(action_fig, width='stretch')
+        else:
+            st.info("No flagged transactions yet for review analytics.")
+
+    st.markdown("<div class='section-header'>Recent Fraud Alerts and Recommended Actions</div>", unsafe_allow_html=True)
+    fraud_alerts = [
+        t for t in st.session_state.flagged_transactions
+        if t.get('transaction_id', t.get('nameOrig', 'N/A')) not in st.session_state.resolved_alerts
+    ]
+
     if len(fraud_alerts) == 0:
-        st.info("✅ No active fraud alerts. Run Real-Time Monitor or Batch Analysis to detect fraudulent transactions.")
+        st.info("No active fraud alerts. Run Real-Time Monitor or Batch Analysis to detect transactions.")
     else:
-        # Show last 10 fraud alerts
         fraud_alerts_to_show = fraud_alerts[-10:]
-        
-        # Create refresh button
-        col_refresh1, col_refresh2 = st.columns([6, 1])
-        with col_refresh2:
-            if st.button("🔄 Refresh", key="refresh_alerts"):
-                st.rerun()
-        
-        # Display fraud alerts with functional buttons
-        st.markdown("""
-        <style>
-        .alert-row {
-            background: white;
-            padding: 14px;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            border: 1px solid #e3f2fd;
-            box-shadow: 0 2px 4px rgba(52, 152, 219, 0.08);
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        
-        # Header row
-        header_cols = st.columns([2, 2, 2, 3, 2, 3, 3])
-        headers = ["TRANSACTION ID", "CUSTOMER ID", "AMOUNT", "FRAUD SCORE", "RISK LEVEL", "TIME", "ACTIONS"]
+        header_cols = st.columns([2, 2, 2, 2, 2, 3, 3])
+        headers = ["TRANSACTION ID", "CUSTOMER ID", "AMOUNT", "RISK", "REVIEW", "RECOMMENDED ACTION", "ACTIONS"]
         for col, header in zip(header_cols, headers):
             col.markdown(f"**{header}**")
-        
         st.markdown("---")
-        
-        # Display each alert with interactive buttons
+
         for idx, alert in enumerate(fraud_alerts_to_show):
             score = alert.get('fraud_score', alert.get('hybrid_score', 0.5))
             risk_level, risk_class = get_risk_level(score)
-            txn_id = alert.get('transaction_id', alert.get('nameOrig', f'TXN_{idx}'))[:15]
-            
-            cols = st.columns([2, 2, 2, 3, 2, 3, 3])
-            
-            with cols[0]:
-                st.markdown(f"**{txn_id}**")
-            with cols[1]:
-                cust_id = alert.get('customer_id', alert.get('nameOrig', 'N/A'))[:15]
-                st.markdown(cust_id)
-            with cols[2]:
-                st.markdown(f"**${alert.get('amount', 0):,.2f}**")
-            with cols[3]:
-                st.markdown(create_fraud_score_bar(score), unsafe_allow_html=True)
-            with cols[4]:
-                st.markdown(f'<span class="badge-{risk_class}">{risk_level}</span>', unsafe_allow_html=True)
-            with cols[5]:
-                timestamp = alert.get('timestamp', 'N/A')
-                st.markdown(f"<small>{timestamp}</small>", unsafe_allow_html=True)
+            txn_id = alert.get('transaction_id', alert.get('nameOrig', f'TXN_{idx}'))[:20]
+            review_status = st.session_state.manual_reviews.get(txn_id, "Pending")
+            recommendation = get_recommended_action(score, review_status)
+
+            cols = st.columns([2, 2, 2, 2, 2, 3, 3])
+            cols[0].markdown(f"**{txn_id}**")
+            cols[1].markdown(alert.get('customer_id', alert.get('nameOrig', 'N/A'))[:15])
+            cols[2].markdown(f"${alert.get('amount', 0):,.2f}")
+            cols[3].markdown(f'<span class="badge-{risk_class}">{risk_level}</span>', unsafe_allow_html=True)
+            cols[4].markdown(review_status)
+            cols[5].markdown(recommendation)
+
             with cols[6]:
-                btn_col1, btn_col2 = st.columns(2)
-                with btn_col1:
-                    if st.button("✅", key=f"resolve_{txn_id}_{idx}", help="Resolve", type="primary"):
-                        st.session_state.resolved_alerts.add(txn_id)
-                        st.toast(f"✅ Resolved {txn_id}", icon="✅")
-                        time.sleep(0.3)
+                action_col1, action_col2, action_col3 = st.columns(3)
+                with action_col1:
+                    if st.button("Confirm", key=f"confirm_{txn_id}_{idx}"):
+                        st.session_state.manual_reviews[txn_id] = "Confirmed Fraud"
                         st.rerun()
-                with btn_col2:
-                    if st.button("🔍", key=f"investigate_{txn_id}_{idx}", help="Investigate"):
-                        with st.expander(f"🔍 Details - {txn_id}", expanded=True):
-                            st.json(alert)
-            
-            st.markdown("<div style='margin: 6px 0;'></div>", unsafe_allow_html=True)
-    
-    # Recent Transactions Section
+                with action_col2:
+                    if st.button("Safe", key=f"safe_{txn_id}_{idx}"):
+                        st.session_state.manual_reviews[txn_id] = "False Positive"
+                        st.rerun()
+                with action_col3:
+                    if st.button("Resolve", key=f"resolve_{txn_id}_{idx}"):
+                        st.session_state.resolved_alerts.add(txn_id)
+                        st.rerun()
+
+            with st.expander(f"View details: {txn_id}", expanded=False):
+                st.json(alert)
+
     st.markdown("<div class='section-header'>Recent Transactions</div>", unsafe_allow_html=True)
-    
-    # Display transactions from recent_transactions
     transactions = st.session_state.recent_transactions[:10] if len(st.session_state.recent_transactions) > 0 else []
-    
     if len(transactions) == 0:
-        st.info("📝 Process transactions in Real-Time Monitor or Batch Analysis to see them appear here")
+        st.info("Process transactions in Real-Time Monitor or Batch Analysis to see them here.")
     else:
-        # Display transactions in grid (2 columns)
         for i in range(0, len(transactions), 2):
             cols = st.columns(2)
-            
             for j, col in enumerate(cols):
                 if i + j < len(transactions):
                     txn = transactions[i + j]
+                    status_badge = "FRAUD" if txn.get('is_fraud') else "CLEAN"
+                    badge_class = "badge-fraud" if txn.get('is_fraud') else "badge-clean"
                     with col:
-                        status_badge = "FRAUD" if txn.get('is_fraud') else "CLEAN"
-                        badge_class = "badge-fraud" if txn.get('is_fraud') else "badge-clean"
-                        
                         st.markdown(f"""
                         <div class="transaction-card">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <span style="color: #7f8c8d; font-size: 13px; font-weight: 600;">{txn.get('transaction_id', 'N/A')}</span>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                <span style="color:#7f8c8d;font-size:13px;font-weight:600;">{txn.get('transaction_id', 'N/A')}</span>
                                 <span class="{badge_class}">{status_badge}</span>
                             </div>
-                            <div style="font-size: 26px; font-weight: 700; color: #2c3e50; margin-bottom: 8px;">
+                            <div style="font-size:24px;font-weight:700;color:#2c3e50;margin-bottom:8px;">
                                 ${txn.get('amount', 0):,.2f}
                             </div>
-                            <div style="color: #7f8c8d; font-size: 13px; margin-bottom: 4px;">
+                            <div style="color:#7f8c8d;font-size:13px;margin-bottom:4px;">
                                 Customer: {txn.get('customer_id', 'N/A')}
                             </div>
-                            <div style="color: #95a5a6; font-size: 12px;">
+                            <div style="color:#95a5a6;font-size:12px;">
                                 {txn.get('timestamp', 'N/A')}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
 
-
 def login_page():
     """Page 1: Login Authentication"""
-    st.title("Mobile Money Fraud Detection System")
-    st.subheader("Login")
-    
-    # Create a centered login form
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        st.markdown("### Please enter your credentials")
-        
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
-        
-        if st.button("Login", type="primary", use_container_width=True):
-            # Hardcoded credentials for prototype
+    load_custom_css()
+
+    left_col, right_col = st.columns([1.1, 1], gap="large")
+
+    with left_col:
+        st.markdown('<div class="login-title">Mobile Money Fraud Detection</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="login-subtitle">Secure analyst access portal for real-time and batch fraud monitoring.</div>',
+            unsafe_allow_html=True
+        )
+
+        st.markdown(
+            """
+            <div class="card">
+                <h4 style="color:#1f5f99; margin-bottom:8px;">System Highlights</h4>
+                <p style="color:#486b8e; margin-bottom:8px;">Hybrid unsupervised model stack:</p>
+                <ul style="color:#486b8e; margin-top:0;">
+                    <li>Isolation Forest</li>
+                    <li>Autoencoder</li>
+                    <li>DBSCAN</li>
+                </ul>
+                <p style="color:#486b8e; margin-bottom:0;">Use this portal to monitor risk, validate alerts, and export investigation reports.</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with right_col:
+        st.markdown('<div class="login-shell">', unsafe_allow_html=True)
+        st.markdown("### Sign In")
+        st.caption("Enter your account details to access the dashboard.")
+
+        username = st.text_input("Username", key="login_username", placeholder="Enter username")
+        password = st.text_input("Password", type="password", key="login_password", placeholder="Enter password")
+
+        if st.button("Login", type="primary", width='stretch'):
+            # Current prototype authentication
             if username == "admin" and password == "admin123":
                 st.session_state.logged_in = True
-                st.success("Login successful!")
+                st.success("Login successful.")
                 st.rerun()
             else:
-                st.error("Invalid credentials. Please try again.")
-        
-        st.info("**Demo Credentials:**\n\nUsername: `admin`\n\nPassword: `admin123`")
+                st.error("Invalid username or password.")
+
+        st.markdown(
+            '<div class="login-note">Contact the administrator if you cannot access your account.</div>',
+            unsafe_allow_html=True
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
-def load_or_train_models(X_train=None):
-    """Helper function to load or train models"""
+def load_or_train_models(X_train=None, scaler=None):
+    """Helper function to load saved models or train and persist new models."""
     model_path = 'trained_models'
     
     if os.path.exists(model_path) and os.path.exists(os.path.join(model_path, 'scaler.pkl')):
@@ -563,8 +875,8 @@ def load_or_train_models(X_train=None):
             st.warning(f"Could not load models: {e}. Training new models...")
     
     # Train new models (X_train must be provided if models don't exist)
-    if X_train is None:
-        raise ValueError("X_train must be provided when training new models")
+    if X_train is None or scaler is None:
+        raise ValueError("Both X_train and scaler must be provided when training new models")
     
     st.info("Training models... This may take a few minutes.")
     progress_bar = st.progress(0)
@@ -587,7 +899,11 @@ def load_or_train_models(X_train=None):
     progress_bar.progress(100)
     st.success("✓ All models trained successfully!")
     
-    return hybrid_model, None  # Return None for scaler as it's passed separately
+    # Persist trained models for reuse in later sessions
+    save_models(hybrid_model, scaler, model_path)
+    st.success("✓ Trained models saved successfully!")
+    
+    return hybrid_model, scaler
 
 
 def real_time_monitor():
@@ -599,6 +915,7 @@ def real_time_monitor():
     uploaded_file = st.file_uploader("Upload Test Dataset (CSV)", type=['csv'], key="realtime_upload")
     
     if uploaded_file is not None:
+        st.session_state.uploaded_datasets.add(uploaded_file.name)
         # Load and prepare data
         df_test = pd.read_csv(uploaded_file)
         st.info(f"Loaded {len(df_test)} transactions for simulation")
@@ -617,8 +934,9 @@ def real_time_monitor():
                     st.success("✓ Scaler loaded successfully!")
                     
                     # Load pre-trained models
-                    hybrid_model, _ = load_or_train_models(None)
+                    hybrid_model, loaded_scaler = load_or_train_models()
                     st.session_state.hybrid_model = hybrid_model
+                    st.session_state.scaler = loaded_scaler
                 else:
                     # Use a sample for training if models don't exist
                     try:
@@ -638,9 +956,10 @@ def real_time_monitor():
                         X_train, scaler, _ = preprocess_data(df_train.copy())
                         st.session_state.scaler = scaler
                         
-                        # Train new models
-                        hybrid_model, _ = load_or_train_models(X_train)
+                        # Train new models and persist them
+                        hybrid_model, fitted_scaler = load_or_train_models(X_train, scaler)
                         st.session_state.hybrid_model = hybrid_model
+                        st.session_state.scaler = fitted_scaler
                     except Exception as e:
                         st.error(f"Error training models: {str(e)}")
                         st.info("Please ensure your CSV file has the correct format and required columns.")
@@ -649,21 +968,24 @@ def real_time_monitor():
                 st.session_state.models_loaded = True
         
         # Simulation controls
-        col1, col2, col3 = st.columns([1, 1, 2])
+        col1, col2 = st.columns([1, 1])
+        suggested_threshold = float(getattr(st.session_state.hybrid_model, "default_threshold", 0.75))
         
         with col1:
             num_transactions = st.number_input("Transactions to simulate", min_value=1, max_value=100, value=20)
         
         with col2:
-            threshold = st.slider("Block Threshold", min_value=0.0, max_value=1.0, value=0.75, step=0.05)
+            threshold = st.slider("Block Threshold", min_value=0.0, max_value=1.0, value=suggested_threshold, step=0.01)
+            st.caption(f"Suggested from training distribution: {suggested_threshold:.3f}")
         
         # Check if scaler is available before simulation
         if st.session_state.scaler is None:
-            st.error("Scaler not loaded! Please ensure models are loaded first or run 'generate_sample_data.py' to train models and generate the scaler.")
+            st.error("Scaler not loaded! Please ensure models are loaded first or run 'python scripts/generate_sample_data.py' to prepare data and train models.")
             st.stop()
         
         # Start simulation button
         if st.button("▶ Start Simulation", type="primary"):
+            st.session_state.analysis_runs += 1
             st.session_state.anomaly_scores_history = []
             st.session_state.flagged_transactions = []
             
@@ -685,11 +1007,8 @@ def real_time_monitor():
                     df_featured = engineer_features(transaction_df.copy())
                     df_selected = select_features(df_featured)
                     
-                    # Step 2: Extract raw feature row
-                    X_row = df_selected.values
-                    
-                    # Step 3: Apply scaler transform to get scaled features
-                    X_scaled = st.session_state.scaler.transform(X_row)
+                    # Step 2: Apply scaler using feature-named dataframe
+                    X_scaled = st.session_state.scaler.transform(df_selected)
                     
                     # Step 4: Get predictions using scaled data
                     predictions, hybrid_scores, individual_scores = st.session_state.hybrid_model.predict(
@@ -729,11 +1048,14 @@ def real_time_monitor():
                         
                         # Store flagged transaction
                         flagged_data = transaction.to_dict()
+                        flagged_data['transaction_id'] = f"TXN{2000 + idx}"
+                        flagged_data['customer_id'] = transaction.get('nameOrig', f'CUST{300 + idx}')[:10]
                         flagged_data['hybrid_score'] = hybrid_score
                         flagged_data['fraud_score'] = hybrid_score
                         flagged_data['risk_level'] = get_risk_level(hybrid_score)[0]
                         flagged_data['timestamp'] = datetime.now().strftime('%m/%d/%Y, %I:%M:%S %p')
                         flagged_data['reason'] = f"High hybrid score ({hybrid_score:.3f})"
+                        flagged_data['recommended_action'] = get_recommended_action(hybrid_score)
                         if individual_scores['autoencoder'][0] > 0.7:
                             flagged_data['reason'] += ", High reconstruction error"
                         if individual_scores['isolation_forest'][0] > 0.7:
@@ -782,25 +1104,32 @@ def real_time_monitor():
                 if len(st.session_state.anomaly_scores_history) > 0:
                     with chart_placeholder.container():
                         scores_df = pd.DataFrame(st.session_state.anomaly_scores_history)
-                        fig, ax = plt.subplots(figsize=(10, 4))
-                        
-                        colors = ['red' if x else 'green' for x in scores_df['blocked']]
-                        ax.scatter(scores_df['transaction_id'], scores_df['score'], c=colors, alpha=0.6)
-                        ax.axhline(y=threshold, color='orange', linestyle='--', label=f'Threshold ({threshold})')
-                        ax.set_xlabel('Transaction Number')
-                        ax.set_ylabel('Hybrid Anomaly Score')
-                        ax.set_title('Real-Time Anomaly Scores')
-                        ax.legend()
-                        ax.grid(True, alpha=0.3)
-                        
-                        st.pyplot(fig, clear_figure=True)
-                        plt.close(fig)
-                        plt.clf()
+                        fig = px.scatter(
+                            scores_df,
+                            x="transaction_id",
+                            y="score",
+                            color="blocked",
+                            color_discrete_map={False: "#2d9bf0", True: "#e74c3c"},
+                            labels={
+                                "transaction_id": "Transaction Number",
+                                "score": "Hybrid Anomaly Score",
+                                "blocked": "Blocked"
+                            }
+                        )
+                        fig.add_hline(y=threshold, line_dash="dash", line_color="#f39c12")
+                        fig.update_layout(
+                            template="plotly_white",
+                            margin=dict(l=10, r=10, t=30, b=10),
+                            title="Real-Time Anomaly Scores"
+                        )
+                        st.plotly_chart(fig, width='stretch')
                 
                 # Simulate delay
                 time.sleep(1)
             
             st.success(f"Simulation complete! Processed {total_processed} transactions, blocked {total_blocked}.")
+            if total_blocked == 0:
+                st.warning("No transactions crossed the threshold in this sample. Lower threshold slightly or increase sample size.")
 
 
 def batch_analysis():
@@ -811,6 +1140,7 @@ def batch_analysis():
     uploaded_file = st.file_uploader("Upload CSV File", type=['csv'], key="batch_upload")
     
     if uploaded_file is not None:
+        st.session_state.uploaded_datasets.add(uploaded_file.name)
         df = pd.read_csv(uploaded_file)
         st.success(f"✓ Loaded {len(df)} transactions")
         
@@ -818,18 +1148,21 @@ def batch_analysis():
         with st.expander("Preview Data"):
             st.dataframe(df.head(10))
         
-        threshold = st.slider("Anomaly Threshold", min_value=0.0, max_value=1.0, value=0.75, step=0.05, key="batch_threshold")
+        suggested_threshold = float(getattr(st.session_state.hybrid_model, "default_threshold", 0.75))
+        threshold = st.slider("Anomaly Threshold", min_value=0.0, max_value=1.0, value=suggested_threshold, step=0.01, key="batch_threshold")
+        st.caption(f"Suggested from training distribution: {suggested_threshold:.3f}")
         
         if st.button("🔍 Analyze Transactions", type="primary"):
+            st.session_state.analysis_runs += 1
             # Prepare models if needed
             if not st.session_state.models_loaded:
                 with st.spinner("Training models..."):
                     df_train = df.sample(min(10000, len(df)), random_state=42)
                     X_train, scaler, _ = preprocess_data(df_train.copy())
                     
-                    hybrid_model, _ = load_or_train_models(X_train)
+                    hybrid_model, fitted_scaler = load_or_train_models(X_train, scaler)
                     st.session_state.hybrid_model = hybrid_model
-                    st.session_state.scaler = scaler
+                    st.session_state.scaler = fitted_scaler
                     st.session_state.models_loaded = True
             
             # Process all transactions
@@ -857,32 +1190,41 @@ def batch_analysis():
             
             # Visualization
             st.markdown("### Anomaly Distribution")
-            
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-            
-            # Scatter plot
-            colors = ['red' if p == 1 else 'blue' for p in predictions]
-            ax1.scatter(range(len(hybrid_scores)), hybrid_scores, c=colors, alpha=0.5, s=20)
-            ax1.axhline(y=threshold, color='orange', linestyle='--', label=f'Threshold ({threshold})')
-            ax1.set_xlabel('Transaction Index')
-            ax1.set_ylabel('Hybrid Anomaly Score')
-            ax1.set_title('Anomaly Scores: Normal (Blue) vs Anomalies (Red)')
-            ax1.legend()
-            ax1.grid(True, alpha=0.3)
-            
-            # Histogram
-            ax2.hist(hybrid_scores[predictions == 0], bins=50, alpha=0.7, label='Normal', color='blue')
-            ax2.hist(hybrid_scores[predictions == 1], bins=50, alpha=0.7, label='Anomalies', color='red')
-            ax2.axvline(x=threshold, color='orange', linestyle='--', label=f'Threshold ({threshold})')
-            ax2.set_xlabel('Hybrid Anomaly Score')
-            ax2.set_ylabel('Frequency')
-            ax2.set_title('Score Distribution')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            st.pyplot(fig, clear_figure=True)
-            plt.close(fig)
+
+            viz_df = pd.DataFrame({
+                'transaction_index': np.arange(len(hybrid_scores)),
+                'hybrid_score': hybrid_scores,
+                'prediction': np.where(predictions == 1, 'Anomaly', 'Normal')
+            })
+
+            plot_col1, plot_col2 = st.columns(2)
+            with plot_col1:
+                score_fig = px.scatter(
+                    viz_df,
+                    x='transaction_index',
+                    y='hybrid_score',
+                    color='prediction',
+                    color_discrete_map={'Normal': '#2d9bf0', 'Anomaly': '#e74c3c'},
+                    title='Anomaly Scores by Transaction'
+                )
+                score_fig.add_hline(y=threshold, line_dash="dash", line_color="#f39c12")
+                score_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(score_fig, width='stretch')
+
+            with plot_col2:
+                hist_fig = px.histogram(
+                    viz_df,
+                    x='hybrid_score',
+                    color='prediction',
+                    nbins=40,
+                    barmode='overlay',
+                    opacity=0.75,
+                    color_discrete_map={'Normal': '#2d9bf0', 'Anomaly': '#e74c3c'},
+                    title='Score Distribution'
+                )
+                hist_fig.add_vline(x=threshold, line_dash="dash", line_color="#f39c12")
+                hist_fig.update_layout(template="plotly_white", margin=dict(l=10, r=10, t=40, b=10))
+                st.plotly_chart(hist_fig, width='stretch')
             
             # Show anomalous transactions
             if num_anomalies > 0:
@@ -893,8 +1235,31 @@ def batch_analysis():
                 df_anomalies['iso_score'] = individual_scores['isolation_forest'][anomaly_indices]
                 df_anomalies['ae_score'] = individual_scores['autoencoder'][anomaly_indices]
                 df_anomalies['dbscan_score'] = individual_scores['dbscan'][anomaly_indices]
+                df_anomalies['recommended_action'] = df_anomalies['hybrid_score'].apply(get_recommended_action)
                 
                 st.dataframe(df_anomalies)
+
+                existing_ids = {
+                    str(t.get('transaction_id', ''))
+                    for t in st.session_state.flagged_transactions
+                }
+                for idx_row, row in df_anomalies.head(200).iterrows():
+                    tx_id = row.get('nameOrig', f"batch_{int(idx_row)}")
+                    if str(tx_id) in existing_ids:
+                        continue
+                    st.session_state.flagged_transactions.append({
+                        'transaction_id': str(tx_id),
+                        'customer_id': str(row.get('nameOrig', 'N/A')),
+                        'type': row.get('type', 'N/A'),
+                        'amount': float(row.get('amount', 0)),
+                        'hybrid_score': float(row['hybrid_score']),
+                        'fraud_score': float(row['hybrid_score']),
+                        'risk_level': get_risk_level(float(row['hybrid_score']))[0],
+                        'timestamp': datetime.now().strftime('%m/%d/%Y, %I:%M:%S %p'),
+                        'reason': "Batch analysis anomaly",
+                        'recommended_action': get_recommended_action(float(row['hybrid_score']))
+                    })
+                    existing_ids.add(str(tx_id))
                 
                 # Download button
                 csv = df_anomalies.to_csv(index=False)
@@ -908,73 +1273,94 @@ def batch_analysis():
 
 def investigation_reports():
     """Page 4: Investigation & Reports"""
-    st.title("Investigation & Reports")
-    st.markdown("View flagged transactions and download reports.")
-    
+    st.title("Investigation and Reports")
+    st.markdown("Validate flagged transactions manually and export investigation outcomes.")
+
     if len(st.session_state.flagged_transactions) == 0:
-        st.info("No flagged transactions yet. Run the Real-Time Monitor or Batch Analysis first.")
-    else:
-        st.success(f"Found {len(st.session_state.flagged_transactions)} flagged transactions")
-        
-        # Convert to DataFrame
-        df_flagged = pd.DataFrame(st.session_state.flagged_transactions)
-        
-        # Display table
-        st.markdown("### Flagged Transactions")
-        
-        # Select columns to display
-        display_cols = ['type', 'amount', 'nameOrig', 'nameDest', 'hybrid_score', 'reason']
-        available_cols = [col for col in display_cols if col in df_flagged.columns]
-        
-        st.dataframe(df_flagged[available_cols], use_container_width=True)
-        
-        # Statistics
-        st.markdown("### Statistics")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Flagged", len(df_flagged))
-        
-        with col2:
-            if 'amount' in df_flagged.columns:
-                avg_amount = df_flagged['amount'].mean()
-                st.metric("Avg Amount", f"${avg_amount:,.2f}")
-        
-        with col3:
-            if 'hybrid_score' in df_flagged.columns:
-                avg_score = df_flagged['hybrid_score'].mean()
-                st.metric("Avg Score", f"{avg_score:.3f}")
-        
-        # Visualization
-        if 'type' in df_flagged.columns:
-            st.markdown("### Transaction Type Distribution")
-            fig, ax = plt.subplots(figsize=(8, 5))
-            type_counts = df_flagged['type'].value_counts()
-            type_counts.plot(kind='bar', ax=ax, color='coral')
-            ax.set_xlabel('Transaction Type')
-            ax.set_ylabel('Count')
-            ax.set_title('Flagged Transactions by Type')
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            st.pyplot(fig, clear_figure=True)
-            plt.close(fig)
-        
-        # Download report
-        st.markdown("### Download Report")
-        csv = df_flagged.to_csv(index=False)
-        st.download_button(
-            label="Download Full Report (CSV)",
-            data=csv,
-            file_name=f"fraud_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            type="primary"
-        )
-        
-        # Clear button
-        if st.button("Clear Flagged Transactions"):
-            st.session_state.flagged_transactions = []
+        st.info("No flagged transactions yet. Run Real-Time Monitor or Batch Analysis first.")
+        return
+
+    st.success(f"Found {len(st.session_state.flagged_transactions)} flagged transactions")
+    df_flagged = pd.DataFrame(st.session_state.flagged_transactions)
+
+    if 'transaction_id' not in df_flagged.columns:
+        df_flagged['transaction_id'] = df_flagged.index.astype(str)
+
+    df_flagged['manual_review'] = df_flagged['transaction_id'].apply(
+        lambda x: st.session_state.manual_reviews.get(str(x), 'Pending')
+    )
+    df_flagged['recommended_action'] = df_flagged.apply(
+        lambda row: get_recommended_action(
+            float(row.get('hybrid_score', row.get('fraud_score', 0.0))),
+            row['manual_review']
+        ),
+        axis=1
+    )
+
+    st.markdown("### Review Queue")
+    display_cols = [
+        'transaction_id', 'type', 'amount', 'customer_id', 'nameOrig',
+        'hybrid_score', 'risk_level', 'manual_review', 'recommended_action', 'reason'
+    ]
+    available_cols = [col for col in display_cols if col in df_flagged.columns]
+    st.dataframe(df_flagged[available_cols], width='stretch')
+
+    st.markdown("### Manual Validation")
+    selectable_ids = [str(x) for x in df_flagged['transaction_id'].head(300).tolist()]
+    selected_txn = st.selectbox("Select transaction ID", selectable_ids)
+    decision_col1, decision_col2, decision_col3 = st.columns(3)
+    with decision_col1:
+        if st.button("Confirm Fraud", type="primary"):
+            st.session_state.manual_reviews[selected_txn] = "Confirmed Fraud"
+            st.rerun()
+    with decision_col2:
+        if st.button("Mark False Positive"):
+            st.session_state.manual_reviews[selected_txn] = "False Positive"
+            st.rerun()
+    with decision_col3:
+        if st.button("Mark Pending"):
+            st.session_state.manual_reviews[selected_txn] = "Pending"
             st.rerun()
 
+    st.markdown("### Investigation Metrics")
+    review_counts = df_flagged['manual_review'].value_counts().to_dict()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Confirmed Fraud", review_counts.get('Confirmed Fraud', 0))
+    col2.metric("False Positive", review_counts.get('False Positive', 0))
+    col3.metric("Pending", review_counts.get('Pending', 0))
+
+    if 'type' in df_flagged.columns:
+        type_df = df_flagged.groupby(['type', 'manual_review']).size().reset_index(name='count')
+        fig = px.bar(
+            type_df,
+            x='type',
+            y='count',
+            color='manual_review',
+            barmode='group',
+            color_discrete_map={
+                'Confirmed Fraud': '#e74c3c',
+                'False Positive': '#2d9bf0',
+                'Pending': '#f39c12'
+            },
+            title='Manual Review Outcome by Transaction Type'
+        )
+        fig.update_layout(template='plotly_white', margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig, width='stretch')
+
+    st.markdown("### Download Report")
+    csv = df_flagged.to_csv(index=False)
+    st.download_button(
+        label="Download Full Investigation Report (CSV)",
+        data=csv,
+        file_name=f"fraud_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        type="primary"
+    )
+
+    if st.button("Clear Flagged Transactions"):
+        st.session_state.flagged_transactions = []
+        st.session_state.manual_reviews = {}
+        st.rerun()
 
 def main():
     """Main application logic with navigation"""
@@ -1019,11 +1405,14 @@ def main():
         st.markdown("**Logged in as:** admin")
         st.markdown(f"**Session:** {datetime.now().strftime('%H:%M:%S')}")
         
-        if st.button("🚪 Logout", use_container_width=True):
+        if st.button("🚪 Logout", width='stretch'):
             st.session_state.logged_in = False
             st.session_state.flagged_transactions = []
             st.session_state.recent_transactions = []
             st.session_state.anomaly_scores_history = []
+            st.session_state.manual_reviews = {}
+            st.session_state.analysis_runs = 0
+            st.session_state.uploaded_datasets = set()
             st.session_state.dashboard_data_loaded = False
             st.rerun()
     
