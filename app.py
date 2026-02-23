@@ -130,29 +130,6 @@ def dashboard_page():
     with col4:
         st.metric("ACTIVE ALERTS", f"{active_count}", "Needs review")
 
-    st.markdown("### Executive Risk Gauge")
-    risk_gauge = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=fraud_rate,
-            title={"text": "Current Fraud Rate (%)"},
-            number={"suffix": "%"},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#2d9bf0"},
-                "steps": [
-                    {"range": [0, 2], "color": "#eaf7ef"},
-                    {"range": [2, 5], "color": "#fff6e5"},
-                    {"range": [5, 100], "color": "#fdecec"},
-                ],
-            },
-        )
-    )
-    risk_gauge.update_layout(
-        template="plotly_white", margin=dict(l=10, r=10, t=40, b=10), height=260
-    )
-    st.plotly_chart(risk_gauge, width="stretch")
-
     chart_col1, chart_col2 = st.columns(2)
     with chart_col1:
         st.markdown("### Transaction Volume and Detection Trend")
