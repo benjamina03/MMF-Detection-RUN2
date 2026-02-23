@@ -25,7 +25,11 @@ from core.session_state import (
     reset_for_logout,
     clear_investigation_queue,
 )
-from core.risk import get_risk_level, get_recommended_action, calculate_objective_status
+from core.risk import (
+    get_risk_level,
+    get_recommended_action,
+)
+from core.report_store import init_report_db, save_report
 from ui.styles import load_custom_css
 
 DATA_DIR = "data"
@@ -42,6 +46,7 @@ st.set_page_config(
 
 # Ensure all required session keys exist before any page logic runs.
 initialize_session_state()
+init_report_db()
 
 
 # Custom CSS for styling - Light White and Blue Theme
@@ -92,9 +97,6 @@ def dashboard_page():
         ]
     )
     st.session_state.active_alerts = active_count
-    objective_status = calculate_objective_status()
-    completed = sum(objective_status.values())
-    progress = completed / len(objective_status)
     resolved_count = len(st.session_state.resolved_alerts)
 
     st.markdown(
@@ -102,7 +104,6 @@ def dashboard_page():
         <div class="hero-panel">
             <div class="hero-title">Hybrid Unsupervised Fraud Intelligence</div>
             <div class="hero-subtitle">Real-time and batch detection using Isolation Forest, Autoencoder, and DBSCAN.</div>
-            <span class="soft-tag">Objectives Completed: {completed}/5</span>
             <span class="soft-tag">Fraud Rate: {fraud_rate:.2f}%</span>
             <span class="soft-tag">Active Alerts: {active_count}</span>
             <span class="soft-tag">Resolved Alerts: {resolved_count}</span>
@@ -129,132 +130,28 @@ def dashboard_page():
     with col4:
         st.metric("ACTIVE ALERTS", f"{active_count}", "Needs review")
 
-    exec_col1, exec_col2 = st.columns(2)
-    with exec_col1:
-        st.markdown("### Executive Risk Gauge")
-        risk_gauge = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=fraud_rate,
-                title={"text": "Current Fraud Rate (%)"},
-                number={"suffix": "%"},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar": {"color": "#2d9bf0"},
-                    "steps": [
-                        {"range": [0, 2], "color": "#eaf7ef"},
-                        {"range": [2, 5], "color": "#fff6e5"},
-                        {"range": [5, 100], "color": "#fdecec"},
-                    ],
-                },
-            )
+    st.markdown("### Executive Risk Gauge")
+    risk_gauge = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=fraud_rate,
+            title={"text": "Current Fraud Rate (%)"},
+            number={"suffix": "%"},
+            gauge={
+                "axis": {"range": [0, 100]},
+                "bar": {"color": "#2d9bf0"},
+                "steps": [
+                    {"range": [0, 2], "color": "#eaf7ef"},
+                    {"range": [2, 5], "color": "#fff6e5"},
+                    {"range": [5, 100], "color": "#fdecec"},
+                ],
+            },
         )
-        risk_gauge.update_layout(
-            template="plotly_white", margin=dict(l=10, r=10, t=40, b=10), height=260
-        )
-        st.plotly_chart(risk_gauge, width="stretch")
-
-    with exec_col2:
-        st.markdown("### Objective Completion Gauge")
-        objective_gauge = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=completed,
-                title={"text": "Objectives Completed"},
-                number={"suffix": "/5"},
-                gauge={
-                    "axis": {"range": [0, 5]},
-                    "bar": {"color": "#1f5f99"},
-                    "steps": [
-                        {"range": [0, 2], "color": "#fdecec"},
-                        {"range": [2, 4], "color": "#fff6e5"},
-                        {"range": [4, 5], "color": "#eaf7ef"},
-                    ],
-                },
-            )
-        )
-        objective_gauge.update_layout(
-            template="plotly_white", margin=dict(l=10, r=10, t=40, b=10), height=260
-        )
-        st.plotly_chart(objective_gauge, width="stretch")
-
-    st.markdown(
-        "<div class='section-header'>Objectives Progress</div>", unsafe_allow_html=True
     )
-    st.progress(progress, text=f"{completed}/5 objectives currently covered")
-
-    for objective, done in objective_status.items():
-        state_text = "Completed" if done else "Pending"
-        state_class = "objective-card objective-complete" if done else "objective-card"
-        st.markdown(
-            f"<div class='{state_class}'><strong>{objective}</strong><br><small>Status: {state_text}</small></div>",
-            unsafe_allow_html=True,
-        )
-
-    objective_rows = []
-    objective_rows.append(
-        {
-            "Objective": "1. Upload mobile money dataset for analysis",
-            "Status": (
-                "Completed"
-                if objective_status["1. Upload mobile money dataset for analysis"]
-                else "Pending"
-            ),
-            "Evidence": f"{len(st.session_state.uploaded_datasets)} dataset(s) uploaded",
-            "How Answered": "Real-Time and Batch upload modules",
-        }
+    risk_gauge.update_layout(
+        template="plotly_white", margin=dict(l=10, r=10, t=40, b=10), height=260
     )
-    objective_rows.append(
-        {
-            "Objective": "2. Analyze transactions against normal behavior",
-            "Status": (
-                "Completed"
-                if objective_status["2. Analyze transactions against normal behavior"]
-                else "Pending"
-            ),
-            "Evidence": f"{st.session_state.analysis_runs} analysis run(s)",
-            "How Answered": "Hybrid score from Isolation Forest + Autoencoder + DBSCAN",
-        }
-    )
-    objective_rows.append(
-        {
-            "Objective": "3. Flag fraudulent activities",
-            "Status": (
-                "Completed"
-                if objective_status["3. Flag fraudulent activities"]
-                else "Pending"
-            ),
-            "Evidence": f"{len(st.session_state.flagged_transactions)} flagged transaction(s)",
-            "How Answered": "Threshold-based anomaly blocking",
-        }
-    )
-    objective_rows.append(
-        {
-            "Objective": "4. Validate flagged transactions via manual inspection",
-            "Status": (
-                "Completed"
-                if objective_status[
-                    "4. Validate flagged transactions via manual inspection"
-                ]
-                else "Pending"
-            ),
-            "Evidence": f"{len(st.session_state.manual_reviews)} reviewed transaction(s)",
-            "How Answered": "Investigation page decision workflow",
-        }
-    )
-    objective_rows.append(
-        {
-            "Objective": "5. Recommend actions after manual analysis",
-            "Status": (
-                "Completed"
-                if objective_status["5. Recommend actions after manual analysis"]
-                else "Pending"
-            ),
-            "Evidence": "Recommendation engine active",
-            "How Answered": "Risk-aware action suggestion for each alert",
-        }
-    )
-    st.dataframe(pd.DataFrame(objective_rows), width="stretch")
+    st.plotly_chart(risk_gauge, width="stretch")
 
     chart_col1, chart_col2 = st.columns(2)
     with chart_col1:
@@ -546,19 +443,27 @@ def dashboard_page():
             cols[5].markdown(recommendation)
 
             with cols[6]:
-                action_col1, action_col2, action_col3 = st.columns(3)
-                with action_col1:
-                    if st.button("Confirm", key=f"confirm_{txn_id}_{idx}"):
-                        st.session_state.manual_reviews[txn_id] = "Confirmed Fraud"
-                        st.rerun()
-                with action_col2:
-                    if st.button("Safe", key=f"safe_{txn_id}_{idx}"):
-                        st.session_state.manual_reviews[txn_id] = "False Positive"
-                        st.rerun()
-                with action_col3:
-                    if st.button("Resolve", key=f"resolve_{txn_id}_{idx}"):
-                        st.session_state.resolved_alerts.add(txn_id)
-                        st.rerun()
+                if st.button(
+                    "Confirm",
+                    key=f"confirm_{txn_id}_{idx}",
+                    use_container_width=True,
+                ):
+                    st.session_state.manual_reviews[txn_id] = "Confirmed Fraud"
+                    st.rerun()
+                if st.button(
+                    "Safe",
+                    key=f"safe_{txn_id}_{idx}",
+                    use_container_width=True,
+                ):
+                    st.session_state.manual_reviews[txn_id] = "False Positive"
+                    st.rerun()
+                if st.button(
+                    "Resolve",
+                    key=f"resolve_{txn_id}_{idx}",
+                    use_container_width=True,
+                ):
+                    st.session_state.resolved_alerts.add(txn_id)
+                    st.rerun()
 
             with st.expander(f"View details: {txn_id}", expanded=False):
                 st.json(alert)
@@ -680,6 +585,12 @@ def login_page():
             unsafe_allow_html=True,
         )
         st.markdown("</div>", unsafe_allow_html=True)
+
+
+def landing_page():
+    """Landing page removed. Redirect to login."""
+    st.session_state.show_landing = False
+    st.rerun()
 
 
 def load_or_train_models(X_train=None, scaler=None):
@@ -1548,24 +1459,55 @@ def investigation_reports():
 
     # Report downloads
     st.markdown("### Download Reports")
+    st.caption("CSV exports are also stored in SQLite at `reports/reports.db`.")
     report_col1, report_col2 = st.columns(2)
     with report_col1:
         filtered_csv = filtered_df.to_csv(index=False)
-        st.download_button(
+        filtered_file_name = (
+            f"filtered_fraud_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        filtered_downloaded = st.download_button(
             label="Download Filtered Report (CSV)",
             data=filtered_csv,
-            file_name=f"filtered_fraud_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=filtered_file_name,
             mime="text/csv",
         )
+        if filtered_downloaded:
+            report_id = save_report(
+                report_type="filtered_investigation_report",
+                file_name=filtered_file_name,
+                dataframe=filtered_df,
+                filters={
+                    "review_status": review_filter,
+                    "risk_levels": risk_filter,
+                    "hybrid_score_range": [min_score, max_score],
+                    "search_transaction_id": search_id.strip(),
+                },
+            )
+            st.success(f"Filtered report saved to SQLite (report_id={report_id}).")
     with report_col2:
         full_csv = df_flagged.to_csv(index=False)
-        st.download_button(
+        full_file_name = (
+            f"full_fraud_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        full_downloaded = st.download_button(
             label="Download Full Investigation Report (CSV)",
             data=full_csv,
-            file_name=f"full_fraud_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=full_file_name,
             mime="text/csv",
             type="primary",
         )
+        if full_downloaded:
+            report_id = save_report(
+                report_type="full_investigation_report",
+                file_name=full_file_name,
+                dataframe=df_flagged,
+                filters={
+                    "source": "investigation_queue",
+                    "generated_from_filtered_view": True,
+                },
+            )
+            st.success(f"Full report saved to SQLite (report_id={report_id}).")
 
     if st.button("Clear Flagged Transactions"):
         clear_investigation_queue()
@@ -1577,6 +1519,9 @@ def main():
 
     # Defensive initialization for reruns/import edge cases.
     initialize_session_state()
+
+    # Landing page removed: route directly to login/system pages.
+    st.session_state.show_landing = False
 
     # Check login status
     if not st.session_state.logged_in:
@@ -1611,20 +1556,22 @@ def main():
                     "padding": "4px 0 4px 0",
                     "background-color": "transparent",
                 },
-                "icon": {"color": "#d7ecff", "font-size": "17px"},
+                "icon": {"color": "#2d9bf0", "font-size": "17px"},
                 "nav-link": {
                     "font-size": "14px",
                     "text-align": "left",
                     "margin": "4px 2px",
                     "padding": "11px 10px",
                     "border-radius": "10px",
-                    "color": "#f3f9ff",
-                    "background-color": "rgba(18, 58, 94, 0.55)",
+                    "color": "#1f2d3d",
+                    "background-color": "#f5faff",
+                    "border": "1px solid #d7e9fb",
                 },
                 "nav-link-selected": {
-                    "background-color": "#ffffff",
+                    "background-color": "#eaf4ff",
                     "color": "#1f5f99",
                     "font-weight": "700",
+                    "border": "1px solid #a9d4ff",
                 },
             },
         )

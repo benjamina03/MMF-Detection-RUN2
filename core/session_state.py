@@ -3,6 +3,7 @@ import streamlit as st
 
 def initialize_session_state():
     defaults = {
+        "show_landing": False,
         "logged_in": False,
         "flagged_transactions": [],
         "recent_transactions": [],
@@ -28,6 +29,7 @@ def initialize_session_state():
 
 def reset_for_logout():
     """Reset session values when user logs out."""
+    st.session_state.show_landing = False
     st.session_state.logged_in = False
     st.session_state.flagged_transactions = []
     st.session_state.recent_transactions = []

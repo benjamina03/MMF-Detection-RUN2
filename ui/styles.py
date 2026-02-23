@@ -5,6 +5,28 @@ def load_custom_css():
     st.markdown(
         """
     <style>
+    html, body, [data-testid="stAppViewContainer"], .stApp {
+        background: #ffffff !important;
+        color: #111111 !important;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(255, 255, 255, 0.92) !important;
+        border-bottom: 1px solid #dbeafd;
+    }
+
+    [data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    .stMarkdown, .stText, p, label, span, div {
+        color: #111111;
+    }
+
+    .stSelectbox label, .stSlider label, .stTextInput label, .stNumberInput label, .stFileUploader label {
+        color: #111111 !important;
+    }
+
     /* Main container - Light theme */
     .main {
         background: radial-gradient(circle at top right, #eaf4ff 0%, #f8fbff 45%, #ffffff 100%);
@@ -38,6 +60,11 @@ def load_custom_css():
         background-color: white;
     }
 
+    [data-testid="stDataFrame"], [data-testid="stTable"] {
+        background: #ffffff !important;
+        color: #111111 !important;
+    }
+
     .stButton>button {
         border-radius: 8px;
         font-weight: 600;
@@ -45,6 +72,7 @@ def load_custom_css():
         color: white;
         border: none;
         transition: all 0.3s ease;
+        min-height: 40px;
     }
 
     .stButton>button:hover {
@@ -182,6 +210,113 @@ def load_custom_css():
         margin-right: 6px;
     }
 
+    .landing-hero {
+        background: linear-gradient(118deg, #0f3d63 0%, #1f5f99 55%, #49a6ff 100%);
+        border-radius: 18px;
+        padding: 28px;
+        color: #ffffff;
+        box-shadow: 0 14px 30px rgba(16, 65, 106, 0.28);
+        margin-bottom: 18px;
+    }
+
+    .landing-hero h1 {
+        margin: 0 0 8px 0;
+        font-size: 34px;
+        line-height: 1.15;
+        font-weight: 800;
+    }
+
+    .landing-hero p {
+        margin: 0 0 14px 0;
+        font-size: 15px;
+        opacity: 0.95;
+    }
+
+    .landing-chip {
+        display: inline-block;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.36);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-right: 6px;
+        margin-bottom: 6px;
+    }
+
+    .landing-card {
+        background: #ffffff;
+        border: 1px solid #d9ebfc;
+        border-radius: 14px;
+        padding: 18px;
+        box-shadow: 0 8px 18px rgba(45, 155, 240, 0.09);
+        margin-bottom: 12px;
+    }
+
+    .landing-card h4 {
+        color: #1f5f99;
+        margin: 0 0 10px 0;
+    }
+
+    .landing-card p, .landing-card li {
+        color: #4f7090;
+        font-size: 14px;
+    }
+
+    .landing-stat-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+
+    .landing-stat-item {
+        background: #ffffff;
+        border: 1px solid #d9ebfc;
+        border-radius: 12px;
+        padding: 12px;
+        text-align: center;
+        box-shadow: 0 6px 14px rgba(45, 155, 240, 0.08);
+    }
+
+    .landing-stat-value {
+        color: #1f5f99;
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .landing-stat-label {
+        color: #6a89a5;
+        font-size: 12px;
+        font-weight: 600;
+        margin-top: 4px;
+    }
+
+    .landing-flow {
+        background: #ffffff;
+        border: 1px solid #d9ebfc;
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 8px 18px rgba(45, 155, 240, 0.09);
+        margin-bottom: 12px;
+    }
+
+    .landing-flow h4 {
+        color: #1f5f99;
+        margin: 0 0 10px 0;
+    }
+
+    .landing-flow-step {
+        background: #f4f9ff;
+        border: 1px solid #dcecff;
+        border-radius: 10px;
+        padding: 9px 10px;
+        color: #42688c;
+        font-size: 13px;
+        margin-bottom: 7px;
+    }
+
     .transaction-card {
         background: white;
         border: 1px solid #e3f2fd;
@@ -268,38 +403,38 @@ def load_custom_css():
     }
 
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #123a5e 0%, #1f5f99 45%, #2d9bf0 100%);
+        background: #ffffff;
+        border-right: 1px solid #dbeafd;
     }
 
     section[data-testid="stSidebar"] * {
-        color: #eaf5ff;
+        color: #1f2d3d;
     }
 
     .sidebar-brand-card {
-        background: rgba(255, 255, 255, 0.14);
-        border: 1px solid rgba(255, 255, 255, 0.28);
+        background: linear-gradient(130deg, #f5faff 0%, #edf6ff 100%);
+        border: 1px solid #d7e9fb;
         border-radius: 14px;
         padding: 12px;
         margin-bottom: 10px;
-        backdrop-filter: blur(2px);
     }
 
     .sidebar-brand-title {
         font-size: 16px;
         font-weight: 800;
-        color: #ffffff;
+        color: #1f5f99;
         margin-bottom: 4px;
     }
 
     .sidebar-brand-sub {
         font-size: 12px;
-        color: #eaf5ff;
+        color: #4f7090;
         margin-bottom: 0;
     }
 
     .sidebar-user-card {
-        background: rgba(255, 255, 255, 0.12);
-        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: #f6fbff;
+        border: 1px solid #d7e9fb;
         border-radius: 12px;
         padding: 12px;
         margin-top: 8px;
@@ -310,12 +445,12 @@ def load_custom_css():
         font-size: 14px;
         font-weight: 700;
         margin-bottom: 8px;
-        color: #ffffff;
+        color: #1f5f99;
     }
 
     .sidebar-user-line {
         font-size: 13px;
-        color: #eaf5ff;
+        color: #4f7090;
         margin-bottom: 4px;
     }
     </style>
